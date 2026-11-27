@@ -275,7 +275,95 @@ function syncThresholdBuffs(battleState, config) {
 }
 
 /**
- * 构建发送给剧情 AI 的精简上下文文本（按 3 个开关按需拼接，省 Token）
+ * 构建创作模式专用的「当前完整配置精简 JSON」（去掉重复的旧版镜像字段，让写卡助手一眼看清全部技能/状态/装备/敌人/槽位/规则的真实数值！）
+ */
+export function buildAuthoringConfigSnapshot(config) {
+    const cleanSkill = (s) => {
+        const out = {
+            id: s.id, worldview: s.worldview, poolType: s.poolType, name: s.name, description: s.description,
+            mpCost: s.mpCost, cooldown: s.cooldown || 0, targetType: s.targetType, effectType: s.effectType,
+            formula: s.formula,
+        };
+        if (s.hitRate !== 100) out.hitRate = s.hitRate;
+        if (s.critRate) { out.critRate = s.critRate; out.critMultiplier = s.critMultiplier; }
+        if (s.selfHpFormula && s.selfHpFormula !== '0') out.selfHpFormula = s.selfHpFormula;
+        if (s.selfGaugeChanges && Object.keys(s.selfGaugeChanges).length) out.selfGaugeChanges = s.selfGaugeChanges;
+        if (s.targetGaugeChanges && Object.keys(s.targetGaugeChanges).length) out.targetGaugeChanges = s.targetGaugeChanges;
+        if (s.extraEffects?.length) out.extraEffects = s.extraEffects;
+        if (s.applyStatuses?.length) out.applyStatuses = s.applyStatuses;
+        if (s.requiredTargetStatusIds?.length) out.requiredTargetStatusIds = s.requiredTargetStatusIds;
+        if (s.requiredSelfStatusIds?.length) out.requiredSelfStatusIds = s.requiredSelfStatusIds;
+        if (s.requiredGaugeId) { out.requiredGaugeId = s.requiredGaugeId; out.requiredGaugeMin = s.requiredGaugeMin || 0; }
+        out.aiPriority = s.aiPriority;
+        if (s.aiHpBelowPercent < 100) out.aiHpBelowPercent = s.aiHpBelowPercent;
+        return out;
+    };
+
+    const cleanStatus = (st) => {
+        const out = {
+            id: st.id, name: st.name, icon: st.icon, description: st.description, duration: st.duration,
+        };
+        if (st.skipTurn) out.skipTurn = true;
+        if (st.perTurnHp) out.perTurnHp = st.perTurnHp;
+        if (st.perTurnMp) out.perTurnMp = st.perTurnMp;
+        if (st.perTurnGauges && Object.keys(st.perTurnGauges).length) out.perTurnGauges = st.perTurnGauges;
+        if (st.gaugeChangeMultipliers?.length) out.gaugeChangeMultipliers = st.gaugeChangeMultipliers;
+        if (st.atkMultiplier !== 1) out.atkMultiplier = st.atkMultiplier;
+        if (st.spiMultiplier !== 1) out.spiMultiplier = st.spiMultiplier;
+        if (st.defMultiplier !== 1) out.defMultiplier = st.defMultiplier;
+        if (st.mdefMultiplier !== 1) out.mdefMultiplier = st.mdefMultiplier;
+        if (st.damageTakenMultiplier !== 1) out.damageTakenMultiplier = st.damageTakenMultiplier;
+        if (st.onExpireStatusIds?.length) out.onExpireStatusIds = st.onExpireStatusIds;
+        if (st.restraintType) {
+            out.restraintType = st.restraintType;
+            out.restraintSourceMode = st.restraintSourceMode;
+            out.restraintPower = st.restraintPower;
+            out.restraintObjectHp = st.restraintObjectHp;
+            if (st.restraintObjectName) out.restraintObjectName = st.restraintObjectName;
+        }
+        return out;
+    };
+
+    const cleanItem = (it) => {
+        const out = {
+            id: it.id, name: it.name, icon: it.icon, description: it.description, quantity: it.quantity,
+            targetType: it.targetType, effectType: it.effectType, formula: it.formula, consumesTurn: it.consumesTurn,
+        };
+        if (it.targetGaugeChanges && Object.keys(it.targetGaugeChanges).length) out.targetGaugeChanges = it.targetGaugeChanges;
+        if (it.applyStatuses?.length) out.applyStatuses = it.applyStatuses;
+        return out;
+    };
+
+    const cleanUnit = (u) => {
+        const out = {
+            id: u.id, enabled: u.enabled, name: u.name, description: u.description,
+            level: u.level, classId: u.classId, maxHp: u.maxHp, maxMp: u.maxMp,
+            atk: u.atk, spi: u.spi, def: u.def, mdef: u.mdef,
+            skillIds: u.skillIds, equipmentIds: u.equipmentIds, aiStrategy: u.aiStrategy,
+        };
+        if (u.initialGauges && Object.keys(u.initialGauges).length) out.initialGauges = u.initialGauges;
+        if (u.freePoints) out.freePoints = u.freePoints;
+        if (u.autoControl) out.autoControl = true;
+        return out;
+    };
+
+    const payload = {
+        progression: config.progression,
+        gauges: config.gauges,
+        classTrees: config.classTrees || [],
+        statuses: (config.statuses || []).map(cleanStatus),
+        skills: (config.skills || []).map(cleanSkill),
+        equipments: config.equipments || [],
+        items: (config.items || []).map(cleanItem),
+        allies: (config.allies || []).map(cleanUnit),
+        enemies: (config.enemies || []).map(cleanUnit),
+        triggerRules: config.triggerRules || [],
+    };
+    return JSON.stringify(payload);
+}
+
+/**
+ * 构建发送给剧情 AI 的上下文文本（普通游玩模式省 Token；创作模式下注入完整配置 JSON 给写卡助手查阅与修改）
  * @param {object|null} battleState
  * @param {object} config
  * @returns {string}
@@ -285,6 +373,16 @@ export function buildAiContextSnapshot(battleState, config) {
 
     const blocks = [];
     const gaugeEntries = getGaugeEntries(config);
+
+    // 创作模式（v2.1 新增）：直接注入当前插件完整详细配置 JSON，供写卡助手精准查看与修改已有设定
+    if (config.general.authoringMode) {
+        const fullJson = buildAuthoringConfigSnapshot(config);
+        blocks.push(
+            '[TRPG 创作模式已开启 · 当前插件完整配置数据（写卡助手可直接查看全部技能公式/状态倍率/装备/敌人/状态槽/规则）]\n'
+            + '提示：你可以在同一个 JSON 代码块里同时修改已有 ID（只写要改的字段即可，加 "_replace":true 为整条替换）、用 "_delete" 删除旧项、用 "_replaceSections" 整块替换分区，并新增新条目；用户复制粘贴点「✏️ 修改+新增导入」即可一步生效。\n'
+            + fullJson
+        );
+    }
 
     // 块 1：我方当前出战角色档案（穿戴装备、已学技能、背包道具）
     if (config.general.syncPartyToAi) {
@@ -359,8 +457,8 @@ export function buildAiContextSnapshot(battleState, config) {
         blocks.push(battleLines.join('\n'));
     }
 
-    // 块 3：极简世界观图鉴目录（ID + 名称 + 一句话简述，供 AI 剧情里按 ID 精准刷怪、增援、发技能/装备/道具）
-    if (config.general.syncCatalogToAi) {
+    // 块 3：极简世界观图鉴目录（若已开启创作模式则省略，避免与完整 JSON 重复占 Token）
+    if (config.general.syncCatalogToAi && !config.general.authoringMode) {
         const catLines = ['[TRPG 可调用图鉴目录（发技能/装备/道具或刷怪/增援时优先引用下列 ID）]'];
 
         if ((config.enemies || []).length > 0) {

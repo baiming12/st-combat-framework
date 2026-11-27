@@ -165,6 +165,7 @@ export async function initSettingsUI(deps) {
     const elSyncParty = container.querySelector('#stcf-set-sync-party');
     const elSyncBattle = container.querySelector('#stcf-set-sync-battle');
     const elSyncCatalog = container.querySelector('#stcf-set-sync-catalog');
+    const elAuthoringMode = container.querySelector('#stcf-set-authoring-mode');
     const elHudCollapsed = container.querySelector('#stcf-set-hud-collapsed');
     const elAutoEndTurn = container.querySelector('#stcf-set-auto-end-turn');
     const elOutputMode = container.querySelector('#stcf-set-output-mode');
@@ -191,6 +192,13 @@ export async function initSettingsUI(deps) {
     elSyncParty.addEventListener('change', () => { deps.getConfig().general.syncPartyToAi = elSyncParty.checked; commitChange(); });
     elSyncBattle.addEventListener('change', () => { deps.getConfig().general.syncBattleToAi = elSyncBattle.checked; commitChange(); });
     elSyncCatalog.addEventListener('change', () => { deps.getConfig().general.syncCatalogToAi = elSyncCatalog.checked; commitChange(); });
+    elAuthoringMode?.addEventListener('change', () => {
+        deps.getConfig().general.authoringMode = elAuthoringMode.checked;
+        commitChange();
+        setIoStatus(elAuthoringMode.checked
+            ? '✍️ 已开启创作模式：写卡助手现可直接看见当前全部技能/状态/装备/敌人完整配置！'
+            : '🎮 已关闭创作模式：已切回日常游玩省 Token 模式');
+    });
     elHudCollapsed.addEventListener('change', () => { deps.getConfig().general.hudStartCollapsed = elHudCollapsed.checked; commitChange(); });
     elAutoEndTurn.addEventListener('change', () => { deps.getConfig().general.autoEndPlayerTurn = elAutoEndTurn.checked; commitChange(); });
     elOutputMode.addEventListener('change', () => { deps.getConfig().general.outputMode = elOutputMode.value; commitChange(); });
@@ -409,10 +417,22 @@ export async function initSettingsUI(deps) {
             setIoStatus(`❌ 导入失败：${err.message}`, true);
         }
     }
-    container.querySelector('#stcf-btn-merge-paste').addEventListener('click', () => handlePasteImport('merge'));
+    container.querySelector('#stcf-btn-merge-paste').addEventListener('click', () => handlePasteImport('patch'));
+    container.querySelector('#stcf-btn-addonly-paste')?.addEventListener('click', () => handlePasteImport('add_only'));
     container.querySelector('#stcf-btn-replace-paste').addEventListener('click', () => {
         if (!window.confirm('完整覆盖会替换当前方案的全部内容，确定继续吗？')) return;
         handlePasteImport('replace');
+    });
+    container.querySelector('#stcf-btn-copy-config')?.addEventListener('click', async () => {
+        const text = JSON.stringify(deps.getConfig(), null, 2);
+        try {
+            await navigator.clipboard.writeText(text);
+            setIoStatus(`📋 已复制当前完整配置 JSON（共 ${text.length} 字），可直接发给写卡助手！`);
+        } catch {
+            elPasteJson.value = text;
+            elPasteJson.select();
+            setIoStatus('📋 已将当前完整配置填入文本框，请按 Ctrl+C 复制。');
+        }
     });
 
     // 文件导出/导入
@@ -1990,6 +2010,7 @@ export async function initSettingsUI(deps) {
         elSyncParty.checked = cfg.general.syncPartyToAi !== false;
         elSyncBattle.checked = cfg.general.syncBattleToAi !== false;
         elSyncCatalog.checked = cfg.general.syncCatalogToAi !== false;
+        if (elAuthoringMode) elAuthoringMode.checked = Boolean(cfg.general.authoringMode);
         elHudCollapsed.checked = cfg.general.hudStartCollapsed !== false;
         elAutoEndTurn.checked = cfg.general.autoEndPlayerTurn !== false;
         elOutputMode.value = cfg.general.outputMode || 'fill_input';

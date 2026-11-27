@@ -163,6 +163,48 @@
             "sticky": 0,
             "cooldown": 0,
             "delay": 0
+        },
+        "4": {
+            "uid": 4,
+            "key": [
+                "创作模式",
+                "修改",
+                "替换",
+                "删除",
+                "补丁",
+                "调整",
+                "改动",
+                "重做"
+            ],
+            "keysecondary": [],
+            "comment": "【写卡助手】创作模式读档与「修改 + 替换 + 删除 + 新增」混合补丁规范 (v2.1)",
+            "content": "当用户开启了插件的 **「✍️ 创作模式」** 时，你的上下文中会出现 `[TRPG 创作模式已开启 · 当前插件完整配置数据]`，其中包含用户当前全部职业树、状态槽、状态/Buff、技能、装备、道具、角色、敌人与阈值规则的完整 JSON。\n\n【工作铁律】\n1. **先读真数据再修改**：严格以 `[TRPG 创作模式已开启 · 当前插件完整配置数据]` 中的真实 `id`、公式和字段为准，严禁凭空编造已有条目的 ID。\n2. **一次 JSON 同时完成「修改旧设定 + 替换 + 删除 + 新增」**：用户点击设置页的 **「✏️ 修改+新增导入」** 时，你只需输出一个 ```json ... ``` 代码块即可同时做到以下 5 种操作：\n   - **① 局部修改已有条目（推荐）**：写相同的 `id` + 仅写需要修改的字段，其余未写字段自动保留！例如只改某技能的暴击率和公式：`{ \"id\": \"wf_c_war_execute\", \"critRate\": 30, \"formula\": \"max(1, atk * 2.5 - target_def * 0.2)\" }`。\n   - **② 整条完全替换已有条目**：在对象里加 `\"_replace\": true`，彻底用新对象覆盖掉该 ID 的旧设定（不保留旧字段）。若同时要改名 ID，可写 `\"_targetId\": \"旧id\", \"_renameTo\": \"新id\"`。\n   - **③ 同时新增条目**：在同一个数组里放入新 `id` 的完整对象，会自动追加到末尾！\n   - **④ 删除指定旧条目**：\n     - 写法 A（顶层删除清单，推荐）：`\"_delete\": { \"skills\": [\"old_sk_1\"], \"statuses\": [\"old_st_1\"], \"gauges\": [\"old_gauge\"] }`（支持 `gauges`、`classTrees`、`statuses`、`skills`、`equipments`、`items`、`allies`、`enemies`、`triggerRules`）；\n     - 写法 B（数组行内删除）：`{ \"id\": \"old_sk_1\", \"_delete\": true }`。\n   - **⑤ 整块替换指定分区（可选）**：顶层写 `\"_replaceSections\": [\"gauges\"]` 表示只把 `gauges` 整个分区替换为本次 JSON 里的内容，其他未列出的分区照常保留或按 ID 修改！\n\n【混合补丁输出范例（同时改旧 + 整条替换 + 删除 + 新增）】\n```json\n{\n  \"_delete\": {\n    \"skills\": [\"wf_u_taunt\"]\n  },\n  \"gauges\": {\n    \"gauge_a\": { \"name\": \"士气\", \"perTurnChange\": 0 },\n    \"sanity\": { \"name\": \"理智\", \"color\": \"#3498db\", \"min\": 0, \"max\": 100, \"perTurnChange\": 0, \"perTurnScope\": \"allies\" }\n  },\n  \"statuses\": [\n    { \"id\": \"wf_st_bind_cage\", \"restraintObjectHp\": 80 }\n  ],\n  \"skills\": [\n    {\n      \"id\": \"wf_c_war_execute\",\n      \"critRate\": 30,\n      \"extraEffects\": [\n        { \"targetType\": \"self\", \"effectType\": \"heal\", \"formula\": \"max(10, last_amount * 0.3)\", \"gaugeChanges\": {} }\n      ]\n    },\n    {\n      \"id\": \"wf_u_sanctuary\",\n      \"worldview\": \"西幻\",\n      \"poolType\": \"universal\",\n      \"name\": \"圣域守护\",\n      \"description\": \"新增通用技：回复全体友方生命并提升士气\",\n      \"mpCost\": 18,\n      \"cooldown\": 2,\n      \"targetType\": \"all_allies\",\n      \"effectType\": \"heal\",\n      \"formula\": \"max(20, spi * 1.1 + 15)\",\n      \"selfGaugeChanges\": {},\n      \"targetGaugeChanges\": { \"gauge_a\": 10 },\n      \"extraEffects\": [],\n      \"applyStatuses\": [],\n      \"aiPriority\": 75,\n      \"aiHpBelowPercent\": 75\n    }\n  ]\n}\n```\n输出后简短告诉用户本次「修改了哪几项、删除了哪几项、新增了哪几项」，提醒其粘贴后点 **「✏️ 修改+新增导入」** 即可！",
+            "constant": true,
+            "vectorized": false,
+            "selective": true,
+            "selectiveLogic": 0,
+            "addMemo": true,
+            "order": 104,
+            "position": 0,
+            "disable": false,
+            "excludeRecursion": false,
+            "preventRecursion": false,
+            "delayUntilRecursion": false,
+            "probability": 100,
+            "useProbability": true,
+            "depth": 4,
+            "group": "",
+            "groupOverride": false,
+            "groupWeight": 100,
+            "scanDepth": null,
+            "caseSensitive": null,
+            "matchWholeWords": null,
+            "useGroupScoring": null,
+            "automationId": "",
+            "role": 0,
+            "sticky": 0,
+            "cooldown": 0,
+            "delay": 0
         }
     }
 }

@@ -11,6 +11,7 @@
         "syncPartyToAi": true,
         "syncBattleToAi": true,
         "syncCatalogToAi": true,
+        "authoringMode": false,
         "outputMode": "fill_input",
         "inputFillStrategy": "append",
         "autoEndPlayerTurn": true,

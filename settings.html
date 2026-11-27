@@ -77,6 +77,11 @@
                     </label>
 
                     <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-authoring-mode">
+                        <span><strong>✍️ 开启创作模式</strong>（向写卡助手注入当前全部技能公式/状态倍率/装备/敌人/状态槽/规则的<strong>完整配置 JSON</strong>；写卡完后关闭可省 Token）</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
                         <input type="checkbox" id="stcf-set-hud-collapsed">
                         <span>打开页面时 HUD 默认折叠为迷你浮标</span>
                     </label>
@@ -128,14 +133,16 @@
                     </div>
                 </div>
 
-                <!-- 配合“写卡助手”的零代码粘贴快速导入 -->
+                <!-- 配合“写卡助手”的零代码粘贴快速导入（支持修改+新增+删除混合补丁） -->
                 <div class="stcf-section-card">
-                    <div class="stcf-section-title">📋 粘贴 JSON 快速导入（配合写卡助手超方便）</div>
-                    <p class="stcf-help-text">直接把写卡助手生成的 JSON（含 <code>```json</code> 代码块也没关系，哪怕只包含几件装备或技能）粘到下方，点<strong>增量合并</strong>即可无缝加入当前配置！</p>
-                    <textarea id="stcf-paste-json" class="text_pole stcf-prompt-textarea" rows="4" placeholder='可直接粘贴完整配置或局部片段，例如：{ "equipments": [...], "items": [...], "skills": [...] }'></textarea>
+                    <div class="stcf-section-title">📋 粘贴 JSON 快速导入（配合写卡助手：支持同时修改旧设定 + 新增 + 删除）</div>
+                    <p class="stcf-help-text">直接把写卡助手生成的 JSON（含 <code>```json</code> 或带前后说明文字都行）粘到下方，点<strong>「✏️ 修改+新增导入」</strong>即可按 ID 精准修改/替换/删除旧条目并同时加入新内容！</p>
+                    <textarea id="stcf-paste-json" class="text_pole stcf-prompt-textarea" rows="4" placeholder='可直接粘贴修改+新增补丁，例如：{ "_delete": {"skills":["old_id"]}, "skills": [{"id":"wf_c_war_execute","critRate":30}, {"id":"new_skill","name":"新技能",...}] }'></textarea>
                     <div class="stcf-btn-group" style="margin-top:6px;">
-                        <button type="button" id="stcf-btn-merge-paste" class="menu_button">➕ 增量合并导入（推荐）</button>
+                        <button type="button" id="stcf-btn-merge-paste" class="menu_button">✏️ 修改+新增导入（推荐）</button>
+                        <button type="button" id="stcf-btn-addonly-paste" class="menu_button" title="只添加新 ID 条目，绝不修改或删除已有设定">➕ 仅新增（不改已有）</button>
                         <button type="button" id="stcf-btn-replace-paste" class="menu_button">🔄 完整覆盖导入</button>
+                        <button type="button" id="stcf-btn-copy-config" class="menu_button" title="一键复制当前完整配置 JSON，方便发给外部 AI 写卡助手">📋 复制当前配置</button>
                     </div>
                 </div>
 

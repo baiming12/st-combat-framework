@@ -168,6 +168,7 @@ export async function initHudUI(deps) {
     const elPhaseBadge = root.querySelector('#stcf-phase-badge');
     const elTurnBadge = root.querySelector('#stcf-turn-badge');
     const elBtnSyncMvu = root.querySelector('#stcf-btn-sync-mvu');
+    const elBtnAuthoring = root.querySelector('#stcf-btn-authoring-mode');
     const elBtnAiContext = root.querySelector('#stcf-btn-ai-context');
     const elContextBox = root.querySelector('#stcf-context-box');
     const elContextChars = root.querySelector('#stcf-context-chars');
@@ -304,6 +305,18 @@ export async function initHudUI(deps) {
 
     elBtnSyncMvu.addEventListener('click', () => {
         deps.onRequestSyncMvu?.();
+    });
+
+    elBtnAuthoring?.addEventListener('click', () => {
+        const cfg = deps.getConfig();
+        if (!cfg?.general) return;
+        cfg.general.authoringMode = !cfg.general.authoringMode;
+        saveConfig(cfg);
+        deps.onConfigMutated?.();
+        deps.onStateMutated();
+        showToast(cfg.general.authoringMode
+            ? '✍️ 创作模式已开启：AI 现可看见完整技能/状态/装备/规则配置'
+            : '🎮 创作模式已关闭，切回日常省 Token 模式');
     });
 
     elBtnAiContext.addEventListener('click', () => {
@@ -955,17 +968,20 @@ export async function initHudUI(deps) {
         renderPendingEvents();
 
         const evBadge = pendingEvents.length ? ` · 🎁${pendingEvents.length}` : '';
+        const authOn = Boolean(config?.general?.authoringMode);
+        const authBadge = authOn ? ' · ✍️创作' : '';
+        elBtnAuthoring?.classList.toggle('active', authOn);
 
         if (!state || !state.active) {
-            elPillBadge.textContent = `待机${evBadge}`;
-            elPhaseBadge.textContent = '未开始';
+            elPillBadge.textContent = `待机${authBadge}${evBadge}`;
+            elPhaseBadge.textContent = authOn ? '创作模式' : '未开始';
             elTurnBadge.textContent = 'T0';
             elBtnStartReset.textContent = '开始战斗';
             elIdle.classList.remove('stcf-hidden');
             elBattleArea.classList.add('stcf-hidden');
         } else {
             const phaseLabel = PHASE_LABELS[state.phase] || state.phase;
-            elPillBadge.textContent = `T${state.turn} ${phaseLabel}${activePrompts.length ? ` · 📌${activePrompts.length}` : ''}${evBadge}`;
+            elPillBadge.textContent = `T${state.turn} ${phaseLabel}${authBadge}${activePrompts.length ? ` · 📌${activePrompts.length}` : ''}${evBadge}`;
             elPhaseBadge.textContent = phaseLabel;
             elTurnBadge.textContent = `第 ${state.turn} 回合`;
             elBtnStartReset.textContent = '重置战斗';

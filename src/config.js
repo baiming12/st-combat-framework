@@ -51,7 +51,7 @@ export function getGaugeEntries(config) {
     return list;
 }
 
-/** 规范化状态槽数值映射（向下兼容旧版 gauge_a / gauge_b 独立字段） */
+/** 规范化状态槽数值映射（向下兼容旧版 gauge_a / gauge_b 独立字段；若显式传入了对象 rawMap 则以 rawMap 为准） */
 function normalizeGaugeDeltaMap(rawMap, legacyA, legacyB) {
     const map = {};
     if (rawMap && typeof rawMap === 'object' && !Array.isArray(rawMap)) {
@@ -61,13 +61,14 @@ function normalizeGaugeDeltaMap(rawMap, legacyA, legacyB) {
                 map[sanitizeGaugeId(k, k)] = num;
             }
         }
+        return map;
     }
     const numA = Number(legacyA);
-    if (map.gauge_a === undefined && Number.isFinite(numA) && numA !== 0) {
+    if (Number.isFinite(numA) && numA !== 0) {
         map.gauge_a = numA;
     }
     const numB = Number(legacyB);
-    if (map.gauge_b === undefined && Number.isFinite(numB) && numB !== 0) {
+    if (Number.isFinite(numB) && numB !== 0) {
         map.gauge_b = numB;
     }
     return map;
@@ -446,6 +447,7 @@ export function normalizeConfig(rawConfig, defaults) {
     general.syncPartyToAi = general.syncPartyToAi !== false;
     general.syncBattleToAi = general.syncBattleToAi !== false;
     general.syncCatalogToAi = general.syncCatalogToAi !== false;
+    general.authoringMode = Boolean(general.authoringMode);
     general.autoEndPlayerTurn = general.autoEndPlayerTurn !== false;
     general.hudStartCollapsed = general.hudStartCollapsed !== false;
 
@@ -821,37 +823,289 @@ export function normalizeStatusDef(st, idx = 0) {
 }
 
 /**
- * 按 ID 增量合并数组（同 ID 更新，新 ID 追加）
- * @param {Array<object>} existingArr
- * @param {Array<object>} incomingArr
- * @param {number} [maxLen]
- * @returns {{ merged: Array<object>, count: number }}
+ * 局部修改单条配置时清理与新字段互斥的旧版单字段，避免 normalize 时旧值反客为主
  */
-function mergeArrayById(existingArr, incomingArr, maxLen = Infinity) {
-    const result = deepClone(existingArr || []);
-    let count = 0;
-    for (const item of incomingArr || []) {
-        if (!item || typeof item !== 'object') continue;
-        const idx = item.id ? result.findIndex(x => x.id === item.id) : -1;
-        if (idx >= 0) {
-            result[idx] = { ...result[idx], ...item };
-            count++;
-        } else if (result.length < maxLen) {
-            result.push(deepClone(item));
-            count++;
-        }
+function mergeSingleItemPatch(existingObj, incomingObj) {
+    const clean = deepClone(incomingObj);
+    const renameTo = typeof clean._renameTo === 'string' ? clean._renameTo.trim() : '';
+    const replaceWhole = Boolean(clean._replace);
+    delete clean._replace;
+    delete clean._delete;
+    delete clean._targetId;
+    delete clean._renameTo;
+
+    if (replaceWhole) {
+        const finalId = renameTo || clean.id || existingObj.id;
+        return { ...clean, id: finalId };
     }
-    return { merged: result, count };
+
+    const merged = { ...deepClone(existingObj), ...clean };
+    if (renameTo) merged.id = renameTo;
+
+    // 同步新旧镜像字段，避免局部修改新字段时被旧字段残留覆盖
+    if (Object.prototype.hasOwnProperty.call(clean, 'selfGaugeChanges')) {
+        delete merged.selfGaugeAChange;
+        delete merged.selfGaugeBChange;
+    } else if (Object.prototype.hasOwnProperty.call(clean, 'selfGaugeAChange') || Object.prototype.hasOwnProperty.call(clean, 'selfGaugeBChange')) {
+        merged.selfGaugeChanges = { ...(merged.selfGaugeChanges || {}) };
+        if (Object.prototype.hasOwnProperty.call(clean, 'selfGaugeAChange')) merged.selfGaugeChanges.gauge_a = Number(clean.selfGaugeAChange) || 0;
+        if (Object.prototype.hasOwnProperty.call(clean, 'selfGaugeBChange')) merged.selfGaugeChanges.gauge_b = Number(clean.selfGaugeBChange) || 0;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(clean, 'targetGaugeChanges')) {
+        delete merged.targetGaugeAChange;
+        delete merged.targetGaugeBChange;
+    } else if (Object.prototype.hasOwnProperty.call(clean, 'targetGaugeAChange') || Object.prototype.hasOwnProperty.call(clean, 'targetGaugeBChange')) {
+        merged.targetGaugeChanges = { ...(merged.targetGaugeChanges || {}) };
+        if (Object.prototype.hasOwnProperty.call(clean, 'targetGaugeAChange')) merged.targetGaugeChanges.gauge_a = Number(clean.targetGaugeAChange) || 0;
+        if (Object.prototype.hasOwnProperty.call(clean, 'targetGaugeBChange')) merged.targetGaugeChanges.gauge_b = Number(clean.targetGaugeBChange) || 0;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(clean, 'perTurnGauges')) {
+        delete merged.perTurnGaugeA;
+        delete merged.perTurnGaugeB;
+    } else if (Object.prototype.hasOwnProperty.call(clean, 'perTurnGaugeA') || Object.prototype.hasOwnProperty.call(clean, 'perTurnGaugeB')) {
+        merged.perTurnGauges = { ...(merged.perTurnGauges || {}) };
+        if (Object.prototype.hasOwnProperty.call(clean, 'perTurnGaugeA')) merged.perTurnGauges.gauge_a = Number(clean.perTurnGaugeA) || 0;
+        if (Object.prototype.hasOwnProperty.call(clean, 'perTurnGaugeB')) merged.perTurnGauges.gauge_b = Number(clean.perTurnGaugeB) || 0;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(clean, 'initialGauges')) {
+        delete merged.initialGaugeA;
+        delete merged.initialGaugeB;
+    } else if (Object.prototype.hasOwnProperty.call(clean, 'initialGaugeA') || Object.prototype.hasOwnProperty.call(clean, 'initialGaugeB')) {
+        merged.initialGauges = { ...(merged.initialGauges || {}) };
+        if (Object.prototype.hasOwnProperty.call(clean, 'initialGaugeA')) merged.initialGauges.gauge_a = Number(clean.initialGaugeA) || 0;
+        if (Object.prototype.hasOwnProperty.call(clean, 'initialGaugeB')) merged.initialGauges.gauge_b = Number(clean.initialGaugeB) || 0;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(clean, 'applyStatuses')) delete merged.applyStatusId;
+    if (Object.prototype.hasOwnProperty.call(clean, 'onExpireStatusIds')) delete merged.onExpireStatusId;
+    if (Object.prototype.hasOwnProperty.call(clean, 'grantSkillIds')) delete merged.grantSkillId;
+    if (Object.prototype.hasOwnProperty.call(clean, 'passiveStatusIds')) delete merged.passiveStatusId;
+    if (Object.prototype.hasOwnProperty.call(clean, 'grantStatusIds')) delete merged.grantStatusId;
+
+    return merged;
 }
 
 /**
- * 从 JSON 文本导入配置（支持「完整替换 replace」与「增量合并 merge」）
+ * 按 ID 执行数组补丁：支持同时修改已有项（局部修改或 _replace 整条替换）、新增新项、删除旧项（_delete）
+ * @param {Array<object>} existingArr
+ * @param {Array<object>} incomingArr
+ * @param {'patch'|'add_only'} mode
+ * @param {number} [maxLen]
+ * @param {Array<string>} [explicitDeleteIds]
+ * @returns {{ merged: Array<object>, added: number, updated: number, deleted: number, skipped: number }}
+ */
+function patchArrayById(existingArr, incomingArr, mode = 'patch', maxLen = Infinity, explicitDeleteIds = []) {
+    let result = deepClone(existingArr || []);
+    let added = 0;
+    let updated = 0;
+    let deleted = 0;
+    let skipped = 0;
+
+    // 1. 先执行顶层 _delete 指定删除的 ID
+    if (mode !== 'add_only' && Array.isArray(explicitDeleteIds) && explicitDeleteIds.length > 0) {
+        const delSet = new Set(explicitDeleteIds.map(String));
+        const before = result.length;
+        result = result.filter(x => !delSet.has(x.id));
+        deleted += before - result.length;
+    }
+
+    // 2. 逐条处理修改、整条替换、行内删除与新增
+    for (const item of incomingArr || []) {
+        if (!item || typeof item !== 'object') continue;
+        const targetId = String(item._targetId || item.id || '').trim();
+        const idx = targetId ? result.findIndex(x => x.id === targetId) : -1;
+
+        if (item._delete === true) {
+            if (mode !== 'add_only' && idx >= 0) {
+                result.splice(idx, 1);
+                deleted++;
+            }
+            continue;
+        }
+
+        if (idx >= 0) {
+            if (mode === 'add_only') {
+                skipped++;
+            } else {
+                result[idx] = mergeSingleItemPatch(result[idx], item);
+                updated++;
+            }
+        } else if (result.length < maxLen) {
+            const clean = deepClone(item);
+            delete clean._replace;
+            delete clean._delete;
+            delete clean._targetId;
+            if (clean._renameTo) { clean.id = String(clean._renameTo).trim(); delete clean._renameTo; }
+            result.push(clean);
+            added++;
+        }
+    }
+
+    return { merged: result, added, updated, deleted, skipped };
+}
+
+/**
+ * 纯函数：将解析后的 JSON 补丁应用到当前配置（支持 patch/merge 修改+新增+删除、add_only 仅新增、replace 完整覆盖）
+ * @param {object|null} currentConfig
+ * @param {object} parsed
+ * @param {'patch'|'merge'|'add_only'|'replace'} mode
+ * @param {object} defaults
+ * @returns {{ config: object, summary: string }}
+ */
+export function applyConfigPatch(currentConfig, parsed, mode = 'patch', defaults) {
+    const effMode = mode === 'merge' ? 'patch' : mode;
+
+    if (effMode === 'replace' || !currentConfig) {
+        const normalized = normalizeConfig(parsed, defaults);
+        return {
+            config: normalized,
+            summary: '已完整替换当前方案配置',
+        };
+    }
+
+    const mergedRaw = deepClone(currentConfig);
+    const notes = [];
+    const replaceSectionSet = new Set(
+        effMode === 'patch' && Array.isArray(parsed._replaceSections)
+            ? parsed._replaceSections.map(String)
+            : []
+    );
+    const deleteMap = (effMode === 'patch' && parsed._delete && typeof parsed._delete === 'object')
+        ? parsed._delete
+        : {};
+
+    if (effMode === 'patch' && parsed.general && typeof parsed.general === 'object') {
+        mergedRaw.general = replaceSectionSet.has('general')
+            ? deepClone(parsed.general)
+            : { ...mergedRaw.general, ...parsed.general };
+        notes.push('基础设置(改)');
+    }
+
+    if (effMode === 'patch' && parsed.progression && typeof parsed.progression === 'object') {
+        if (replaceSectionSet.has('progression')) {
+            mergedRaw.progression = deepClone(parsed.progression);
+        } else {
+            mergedRaw.progression = {
+                ...mergedRaw.progression,
+                ...parsed.progression,
+                enabledWorldviews: Array.isArray(parsed.progression.enabledWorldviews)
+                    ? (parsed.progression._replaceWorldviews
+                        ? [...new Set(parsed.progression.enabledWorldviews.map(String))]
+                        : [...new Set([...(mergedRaw.progression?.enabledWorldviews || []), ...parsed.progression.enabledWorldviews])])
+                    : mergedRaw.progression?.enabledWorldviews,
+                statGains: {
+                    ...(mergedRaw.progression?.statGains || {}),
+                    ...(parsed.progression.statGains || {}),
+                },
+            };
+        }
+        notes.push('成长设置(改)');
+    }
+
+    // 处理自定义状态槽（支持整块替换、删除、局部修改已有槽、新增额外槽）
+    if (!mergedRaw.gauges || typeof mergedRaw.gauges !== 'object') mergedRaw.gauges = {};
+    let gAdded = 0; let gUpdated = 0; let gDeleted = 0;
+    if (effMode === 'patch' && Array.isArray(deleteMap.gauges)) {
+        for (const delGid of deleteMap.gauges) {
+            const cid = sanitizeGaugeId(delGid, delGid);
+            if (mergedRaw.gauges[cid]) { delete mergedRaw.gauges[cid]; gDeleted++; }
+            else if (mergedRaw.gauges[delGid]) { delete mergedRaw.gauges[delGid]; gDeleted++; }
+        }
+    }
+    if (parsed.gauges && typeof parsed.gauges === 'object') {
+        if (replaceSectionSet.has('gauges')) {
+            mergedRaw.gauges = {};
+        }
+        const entries = Array.isArray(parsed.gauges)
+            ? parsed.gauges.filter(g => g && typeof g === 'object').map((g, i) => [g.id || `gauge_${i + 1}`, g])
+            : Object.entries(parsed.gauges).filter(([, g]) => g && typeof g === 'object');
+        for (const [k, g] of entries) {
+            const gid = sanitizeGaugeId(g._targetId || g.id || k, k);
+            if (g._delete === true) {
+                if (effMode === 'patch' && mergedRaw.gauges[gid]) { delete mergedRaw.gauges[gid]; gDeleted++; }
+                continue;
+            }
+            const exists = Boolean(mergedRaw.gauges[gid]);
+            if (exists && effMode === 'add_only') continue;
+            const cleanG = deepClone(g);
+            delete cleanG._replace;
+            delete cleanG._delete;
+            delete cleanG._targetId;
+            const finalId = cleanG._renameTo ? sanitizeGaugeId(cleanG._renameTo, gid) : gid;
+            delete cleanG._renameTo;
+            if (exists && finalId !== gid) delete mergedRaw.gauges[gid];
+            mergedRaw.gauges[finalId] = (exists && !g._replace)
+                ? { ...mergedRaw.gauges[gid], ...cleanG, id: finalId }
+                : { ...cleanG, id: finalId };
+            if (exists) gUpdated++; else gAdded++;
+        }
+    }
+    if (gAdded || gUpdated || gDeleted) {
+        const parts = [];
+        if (gUpdated) parts.push(`改${gUpdated}`);
+        if (gAdded) parts.push(`增${gAdded}`);
+        if (gDeleted) parts.push(`删${gDeleted}`);
+        notes.push(`状态槽(${parts.join('/')})`);
+    }
+
+    const sections = [
+        ['classTrees', '职业树', Infinity],
+        ['statuses', '状态', Infinity],
+        ['skills', '技能', Infinity],
+        ['equipments', '装备', Infinity],
+        ['items', '道具', Infinity],
+        ['allies', '我方角色', MAX_UNITS_PER_SIDE],
+        ['enemies', '敌方图鉴', Infinity],
+        ['triggerRules', '触发规则', Infinity],
+    ];
+
+    for (const [key, label, maxLen] of sections) {
+        const incomingArr = Array.isArray(parsed[key]) ? parsed[key] : null;
+        const delIds = Array.isArray(deleteMap[key]) ? deleteMap[key] : [];
+
+        if (replaceSectionSet.has(key) && incomingArr) {
+            mergedRaw[key] = deepClone(incomingArr.slice(0, maxLen));
+            notes.push(`${label}(整区替换为${mergedRaw[key].length}项)`);
+            continue;
+        }
+
+        if ((incomingArr && incomingArr.length > 0) || delIds.length > 0) {
+            const { merged, added, updated, deleted, skipped } = patchArrayById(
+                mergedRaw[key],
+                incomingArr || [],
+                effMode === 'add_only' ? 'add_only' : 'patch',
+                maxLen,
+                delIds
+            );
+            mergedRaw[key] = merged;
+            const parts = [];
+            if (updated) parts.push(`改${updated}`);
+            if (added) parts.push(`增${added}`);
+            if (deleted) parts.push(`删${deleted}`);
+            if (skipped) parts.push(`跳过已有${skipped}`);
+            if (parts.length > 0) notes.push(`${label}(${parts.join('/')})`);
+        }
+    }
+
+    const normalized = normalizeConfig(mergedRaw, defaults);
+    const modeLabel = effMode === 'add_only' ? '仅新增导入完成' : '修改+新增导入成功';
+    return {
+        config: normalized,
+        summary: notes.length ? `${modeLabel}：${notes.join('、')}` : '未检测到需要新增、修改或删除的字段',
+    };
+}
+
+/**
+ * 从 JSON 文本导入配置（支持「修改+新增 patch/merge」、「仅新增 add_only」与「完整替换 replace」）
  * @param {string} jsonText
- * @param {'replace'|'merge'} mode
- * @param {object|null} currentConfig 增量合并时必传
+ * @param {'patch'|'merge'|'add_only'|'replace'} mode
+ * @param {object|null} currentConfig 非 replace 模式时必传
  * @returns {Promise<{ config: object, summary: string }>}
  */
-export async function importConfigFromJsonText(jsonText, mode = 'replace', currentConfig = null) {
+export async function importConfigFromJsonText(jsonText, mode = 'patch', currentConfig = null) {
     const cleaned = stripMarkdownJsonFence(jsonText);
     let parsed;
     try {
@@ -864,83 +1118,9 @@ export async function importConfigFromJsonText(jsonText, mode = 'replace', curre
     }
 
     const defaults = await loadDefaultConfig();
-
-    if (mode === 'merge' && currentConfig) {
-        const mergedRaw = deepClone(currentConfig);
-        const notes = [];
-
-        if (parsed.general && typeof parsed.general === 'object') {
-            mergedRaw.general = { ...mergedRaw.general, ...parsed.general };
-            notes.push('基础设置');
-        }
-        if (parsed.progression && typeof parsed.progression === 'object') {
-            mergedRaw.progression = {
-                ...mergedRaw.progression,
-                ...parsed.progression,
-                enabledWorldviews: Array.isArray(parsed.progression.enabledWorldviews)
-                    ? [...new Set([...(mergedRaw.progression?.enabledWorldviews || []), ...parsed.progression.enabledWorldviews])]
-                    : mergedRaw.progression?.enabledWorldviews,
-                statGains: {
-                    ...(mergedRaw.progression?.statGains || {}),
-                    ...(parsed.progression.statGains || {}),
-                },
-            };
-            notes.push('成长与世界观设置');
-        }
-        if (parsed.gauges && typeof parsed.gauges === 'object') {
-            if (!mergedRaw.gauges || typeof mergedRaw.gauges !== 'object') mergedRaw.gauges = {};
-            let gCount = 0;
-            if (Array.isArray(parsed.gauges)) {
-                for (const g of parsed.gauges) {
-                    if (!g || typeof g !== 'object') continue;
-                    const gid = sanitizeGaugeId(g.id || `gauge_${Object.keys(mergedRaw.gauges).length + 1}`);
-                    mergedRaw.gauges[gid] = { ...(mergedRaw.gauges[gid] || {}), ...g, id: gid };
-                    gCount++;
-                }
-            } else {
-                for (const [k, g] of Object.entries(parsed.gauges)) {
-                    if (!g || typeof g !== 'object') continue;
-                    const gid = sanitizeGaugeId(g.id || k, k);
-                    mergedRaw.gauges[gid] = { ...(mergedRaw.gauges[gid] || {}), ...g, id: gid };
-                    gCount++;
-                }
-            }
-            if (gCount > 0) notes.push(`${gCount} 个特殊状态槽`);
-        }
-
-        const sections = [
-            ['classTrees', '职业树', Infinity],
-            ['statuses', '状态', Infinity],
-            ['skills', '技能', Infinity],
-            ['equipments', '装备', Infinity],
-            ['items', '道具', Infinity],
-            ['allies', '我方角色', MAX_UNITS_PER_SIDE],
-            ['enemies', '敌方图鉴', Infinity],
-            ['triggerRules', '触发规则', Infinity],
-        ];
-
-        for (const [key, label, maxLen] of sections) {
-            if (Array.isArray(parsed[key]) && parsed[key].length > 0) {
-                const { merged, count } = mergeArrayById(mergedRaw[key], parsed[key], maxLen);
-                mergedRaw[key] = merged;
-                notes.push(`${count} 项${label}`);
-            }
-        }
-
-        const normalized = normalizeConfig(mergedRaw, defaults);
-        saveConfig(normalized);
-        return {
-            config: normalized,
-            summary: notes.length ? `增量合并成功：已导入/更新 ${notes.join('、')}` : '未检测到可合并的字段',
-        };
-    }
-
-    const normalized = normalizeConfig(parsed, defaults);
-    saveConfig(normalized);
-    return {
-        config: normalized,
-        summary: '已完整替换当前方案配置',
-    };
+    const res = applyConfigPatch(currentConfig, parsed, mode, defaults);
+    saveConfig(res.config);
+    return res;
 }
 
 /**
