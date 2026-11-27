@@ -229,6 +229,9 @@ export async function initSettingsUI(deps) {
         }
         for (const st of cfg.statuses || []) {
             renameGaugeKeyInMap(st.perTurnGauges, oldId, newId);
+            for (const rule of st.gaugeChangeMultipliers || []) {
+                if (rule && rule.gaugeId === oldId) rule.gaugeId = newId;
+            }
         }
         for (const r of cfg.triggerRules || []) {
             if (r.conditionType === oldId) r.conditionType = newId;
@@ -1420,7 +1423,8 @@ export async function initSettingsUI(deps) {
             icon: '✨',
             description: '自定义组合状态说明',
             skipTurn: false,
-            perTurnHp: -10, perTurnMp: 0, perTurnGaugeA: 0, perTurnGaugeB: 0,
+            perTurnHp: -10, perTurnMp: 0, perTurnGaugeA: 0, perTurnGaugeB: 0, perTurnGauges: {},
+            gaugeChangeMultipliers: [],
             atkMultiplier: 1, spiMultiplier: 1, defMultiplier: 1, mdefMultiplier: 1,
             duration: 2,
             onExpireStatusIds: [],
@@ -1442,16 +1446,37 @@ export async function initSettingsUI(deps) {
             const cardKey = `st:${st.id}`;
             const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
             const expIds = Array.isArray(st.onExpireStatusIds) ? st.onExpireStatusIds : [];
+            const gmList = Array.isArray(st.gaugeChangeMultipliers) ? st.gaugeChangeMultipliers : [];
+            const gmTag = gmList.length > 0 ? ` · 📊槽倍率×${gmList.length}` : '';
             const bindTag = st.restraintType === 'physical'
                 ? ' · ⛓️物理束缚'
                 : (st.restraintType === 'magical' ? ' · ⛓️法术束缚' : '');
+
+            const gmRowsHtml = gmList.map((gm, gIdx) => {
+                const gaugeOpts = [
+                    `<option value="_all" ${gm.gaugeId === '_all' ? 'selected' : ''}>全部状态槽</option>`,
+                    ...gaugeEntries.map(g => `<option value="${escapeHtml(g.id)}" ${gm.gaugeId === g.id ? 'selected' : ''}>${escapeHtml(g.name)} (${escapeHtml(g.id)})</option>`),
+                ].join('');
+                return `
+                    <div class="stcf-apply-row" data-gm-index="${gIdx}">
+                        <select class="text_pole" data-gm-field="gaugeId">${gaugeOpts}</select>
+                        <select class="text_pole stcf-tgt-select" data-gm-field="direction">
+                            <option value="both" ${gm.direction === 'both' ? 'selected' : ''}>增减全部</option>
+                            <option value="gain" ${gm.direction === 'gain' ? 'selected' : ''}>仅增加(+)</option>
+                            <option value="loss" ${gm.direction === 'loss' ? 'selected' : ''}>仅减少(-)</option>
+                        </select>
+                        <input type="number" step="0.1" min="0" class="text_pole stcf-pct-input" data-gm-field="multiplier" value="${gm.multiplier ?? 1}" title="变化倍率（1.5=增加50%，0.5=减半，0=免疫该变化）">
+                        <button type="button" class="stcf-del-btn" data-gm-action="remove" title="删除倍率规则">✖</button>
+                    </div>
+                `;
+            }).join('');
 
             return `
                 <details class="stcf-item-card stcf-fold" data-index="${idx}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
                     <summary class="stcf-fold-summary">
                         <span class="stcf-fold-title">
                             ${escapeHtml(st.icon || '✨')} <strong>${escapeHtml(st.name)}</strong>
-                            <small class="stcf-muted">${st.duration}回合${st.skipTurn ? ' · 💫跳回合' : ''}${bindTag}${expIds.length ? ` · 结束转${expIds.length}态` : ''}</small>
+                            <small class="stcf-muted">${st.duration}回合${st.skipTurn ? ' · 💫跳回合' : ''}${bindTag}${gmTag}${expIds.length ? ` · 结束转${expIds.length}态` : ''}</small>
                         </span>
                         <span class="stcf-fold-right">
                             <span class="stcf-id-tag">${escapeHtml(st.id)}</span>
@@ -1485,6 +1510,14 @@ export async function initSettingsUI(deps) {
                             <label class="stcf-mini-field"><span>法抗倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="mdefMultiplier" value="${st.mdefMultiplier ?? 1}"></label>
                             <label class="stcf-mini-field"><span>持续回合数</span><input type="number" min="1" class="text_pole" data-field="duration" value="${st.duration}"></label>
                         </div>
+                        <details class="stcf-sub-fold">
+                            <summary>📊 状态槽增减倍率（Buff 加成 · 已配 ${gmList.length} 项）</summary>
+                            <div class="stcf-sub-body">
+                                <div class="stcf-muted" style="margin-bottom:5px;">当此角色的状态槽数值增加或减少时乘以对应倍率（如 1.5=增幅50%，2=翻倍，0.5=减半，0=完全阻挡变化；多条 Buff 累乘）。</div>
+                                <button type="button" class="menu_button stcf-sm-btn" data-gm-action="add" style="margin-bottom:6px;">➕ 添加状态槽倍率</button>
+                                ${gmRowsHtml || '<div class="stcf-muted">未设置额外倍率（默认 ×1）</div>'}
+                            </div>
+                        </details>
                         <details class="stcf-sub-fold">
                             <summary>⛓️ 束缚/禁锢机制（${st.restraintType ? (st.restraintType === 'magical' ? '法术类束缚' : '物理类束缚') : '未开启'}）</summary>
                             <div class="stcf-sub-body">
@@ -1521,30 +1554,68 @@ export async function initSettingsUI(deps) {
     }
 
     elStatusesEditor.addEventListener('input', (e) => {
-        if (!e.target.dataset.statusTickGauge) return;
         const card = e.target.closest('.stcf-item-card');
         if (!card) return;
         const st = deps.getConfig().statuses[Number(card.dataset.index)];
         if (!st) return;
-        const gid = e.target.dataset.statusTickGauge;
-        const val = Math.round(Number(e.target.value) || 0);
-        if (!st.perTurnGauges || typeof st.perTurnGauges !== 'object') st.perTurnGauges = {};
-        if (val === 0) delete st.perTurnGauges[gid]; else st.perTurnGauges[gid] = val;
-        if (gid === 'gauge_a') st.perTurnGaugeA = val;
-        if (gid === 'gauge_b') st.perTurnGaugeB = val;
-        commitChange();
+        if (e.target.dataset.statusTickGauge) {
+            const gid = e.target.dataset.statusTickGauge;
+            const val = Math.round(Number(e.target.value) || 0);
+            if (!st.perTurnGauges || typeof st.perTurnGauges !== 'object') st.perTurnGauges = {};
+            if (val === 0) delete st.perTurnGauges[gid]; else st.perTurnGauges[gid] = val;
+            if (gid === 'gauge_a') st.perTurnGaugeA = val;
+            if (gid === 'gauge_b') st.perTurnGaugeB = val;
+            commitChange();
+            return;
+        }
+        if (e.target.dataset.gmField === 'multiplier') {
+            const row = e.target.closest('[data-gm-index]');
+            const gm = st.gaugeChangeMultipliers?.[Number(row?.dataset.gmIndex)];
+            if (gm) {
+                const v = Number(e.target.value);
+                gm.multiplier = Number.isFinite(v) && v >= 0 ? v : 1;
+                commitChange();
+            }
+        }
     });
     elStatusesEditor.addEventListener('change', (e) => {
-        if (!e.target.dataset.statusExpireId) return;
         const card = e.target.closest('.stcf-item-card');
         if (!card) return;
         const st = deps.getConfig().statuses[Number(card.dataset.index)];
         if (!st) return;
+        if (e.target.dataset.gmField) {
+            const row = e.target.closest('[data-gm-index]');
+            const gm = st.gaugeChangeMultipliers?.[Number(row?.dataset.gmIndex)];
+            if (gm) {
+                gm[e.target.dataset.gmField] = e.target.type === 'number'
+                    ? Math.max(0, Number(e.target.value) || 0)
+                    : e.target.value;
+                commitChange();
+            }
+            return;
+        }
+        if (!e.target.dataset.statusExpireId) return;
         const set = new Set(st.onExpireStatusIds || []);
         if (e.target.checked) set.add(e.target.dataset.statusExpireId);
         else set.delete(e.target.dataset.statusExpireId);
         st.onExpireStatusIds = [...set];
         commitChange();
+    });
+    elStatusesEditor.addEventListener('click', (e) => {
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const st = deps.getConfig().statuses[Number(card.dataset.index)];
+        if (!st) return;
+        if (e.target.closest('[data-gm-action="add"]')) {
+            if (!Array.isArray(st.gaugeChangeMultipliers)) st.gaugeChangeMultipliers = [];
+            const firstG = getGaugeEntries(deps.getConfig())[0]?.id || '_all';
+            st.gaugeChangeMultipliers.push({ gaugeId: firstG, direction: 'gain', multiplier: 1.5 });
+            commitChange(true);
+        } else if (e.target.closest('[data-gm-action="remove"]')) {
+            const row = e.target.closest('[data-gm-index]');
+            st.gaugeChangeMultipliers.splice(Number(row.dataset.gmIndex), 1);
+            commitChange(true);
+        }
     });
     bindSimpleListEvents(elStatusesEditor, () => deps.getConfig().statuses, ['name', 'icon', 'restraintType']);
 

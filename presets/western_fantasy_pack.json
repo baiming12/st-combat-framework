@@ -15,24 +15,6 @@
             "mdefMag": 2
         }
     },
-    "gauges": {
-        "gauge_a": {
-            "name": "战意/魔压",
-            "color": "#e67e22",
-            "min": 0,
-            "max": 100,
-            "perTurnChange": -5,
-            "perTurnScope": "all"
-        },
-        "gauge_b": {
-            "name": "腐化/侵蚀",
-            "color": "#9b59b6",
-            "min": 0,
-            "max": 100,
-            "perTurnChange": 0,
-            "perTurnScope": "all"
-        }
-    },
     "classTrees": [
         {
             "id": "wf_warrior",
@@ -48,9 +30,18 @@
             "bonusDef": 4,
             "bonusMdef": 1,
             "unlockSkills": [
-                { "skillId": "wf_c_war_shieldbash", "level": 1 },
-                { "skillId": "wf_c_war_whirlwind", "level": 2 },
-                { "skillId": "wf_c_war_execute", "level": 4 }
+                {
+                    "skillId": "wf_c_war_shieldbash",
+                    "level": 1
+                },
+                {
+                    "skillId": "wf_c_war_whirlwind",
+                    "level": 2
+                },
+                {
+                    "skillId": "wf_c_war_execute",
+                    "level": 4
+                }
             ]
         },
         {
@@ -67,9 +58,18 @@
             "bonusDef": 1,
             "bonusMdef": 0,
             "unlockSkills": [
-                { "skillId": "wf_c_bar_cleave", "level": 1 },
-                { "skillId": "wf_c_bar_berserk", "level": 2 },
-                { "skillId": "wf_c_bar_earthshatter", "level": 4 }
+                {
+                    "skillId": "wf_c_bar_cleave",
+                    "level": 1
+                },
+                {
+                    "skillId": "wf_c_bar_berserk",
+                    "level": 2
+                },
+                {
+                    "skillId": "wf_c_bar_earthshatter",
+                    "level": 4
+                }
             ]
         },
         {
@@ -86,9 +86,18 @@
             "bonusDef": 4,
             "bonusMdef": 4,
             "unlockSkills": [
-                { "skillId": "wf_c_pal_smite", "level": 1 },
-                { "skillId": "wf_c_pal_aegis", "level": 2 },
-                { "skillId": "wf_c_pal_judgment", "level": 4 }
+                {
+                    "skillId": "wf_c_pal_smite",
+                    "level": 1
+                },
+                {
+                    "skillId": "wf_c_pal_aegis",
+                    "level": 2
+                },
+                {
+                    "skillId": "wf_c_pal_judgment",
+                    "level": 4
+                }
             ]
         },
         {
@@ -105,9 +114,18 @@
             "bonusDef": 2,
             "bonusMdef": 2,
             "unlockSkills": [
-                { "skillId": "wf_c_rng_pierce", "level": 1 },
-                { "skillId": "wf_c_rng_volley", "level": 2 },
-                { "skillId": "wf_c_rng_snipe", "level": 4 }
+                {
+                    "skillId": "wf_c_rng_pierce",
+                    "level": 1
+                },
+                {
+                    "skillId": "wf_c_rng_volley",
+                    "level": 2
+                },
+                {
+                    "skillId": "wf_c_rng_snipe",
+                    "level": 4
+                }
             ]
         },
         {
@@ -124,9 +142,18 @@
             "bonusDef": 1,
             "bonusMdef": 5,
             "unlockSkills": [
-                { "skillId": "wf_c_pri_heal", "level": 1 },
-                { "skillId": "wf_c_pri_hymn", "level": 2 },
-                { "skillId": "wf_c_pri_radiance", "level": 4 }
+                {
+                    "skillId": "wf_c_pri_heal",
+                    "level": 1
+                },
+                {
+                    "skillId": "wf_c_pri_hymn",
+                    "level": 2
+                },
+                {
+                    "skillId": "wf_c_pri_radiance",
+                    "level": 4
+                }
             ]
         },
         {
@@ -143,9 +170,18 @@
             "bonusDef": 2,
             "bonusMdef": 4,
             "unlockSkills": [
-                { "skillId": "wf_c_sha_hex", "level": 1 },
-                { "skillId": "wf_c_sha_totem", "level": 2 },
-                { "skillId": "wf_c_sha_reap", "level": 4 }
+                {
+                    "skillId": "wf_c_sha_hex",
+                    "level": 1
+                },
+                {
+                    "skillId": "wf_c_sha_totem",
+                    "level": 2
+                },
+                {
+                    "skillId": "wf_c_sha_reap",
+                    "level": 4
+                }
             ]
         },
         {
@@ -162,8 +198,14 @@
             "bonusDef": 0,
             "bonusMdef": 4,
             "unlockSkills": [
-                { "skillId": "wf_c_mag_missile", "level": 1 },
-                { "skillId": "wf_c_mag_focus", "level": 2 }
+                {
+                    "skillId": "wf_c_mag_missile",
+                    "level": 1
+                },
+                {
+                    "skillId": "wf_c_mag_focus",
+                    "level": 2
+                }
             ]
         },
         {
@@ -180,9 +222,18 @@
             "bonusDef": 1,
             "bonusMdef": 6,
             "unlockSkills": [
-                { "skillId": "wf_c_ele_fireburst", "level": 3 },
-                { "skillId": "wf_c_ele_frostlock", "level": 4 },
-                { "skillId": "wf_c_ele_meteor", "level": 5 }
+                {
+                    "skillId": "wf_c_ele_fireburst",
+                    "level": 3
+                },
+                {
+                    "skillId": "wf_c_ele_frostlock",
+                    "level": 4
+                },
+                {
+                    "skillId": "wf_c_ele_meteor",
+                    "level": 5
+                }
             ]
         },
         {
@@ -199,9 +250,18 @@
             "bonusDef": 1,
             "bonusMdef": 7,
             "unlockSkills": [
-                { "skillId": "wf_c_nec_blight", "level": 3 },
-                { "skillId": "wf_c_nec_drain", "level": 4 },
-                { "skillId": "wf_c_nec_scourge", "level": 5 }
+                {
+                    "skillId": "wf_c_nec_blight",
+                    "level": 3
+                },
+                {
+                    "skillId": "wf_c_nec_drain",
+                    "level": 4
+                },
+                {
+                    "skillId": "wf_c_nec_scourge",
+                    "level": 5
+                }
             ]
         }
     ],
@@ -214,7 +274,7 @@
             "skipTurn": false,
             "perTurnHp": -12,
             "perTurnMp": 0,
-            "perTurnGaugeA": 5,
+            "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1,
             "spiMultiplier": 1,
@@ -231,7 +291,7 @@
             "skipTurn": false,
             "perTurnHp": -14,
             "perTurnMp": 0,
-            "perTurnGaugeA": 8,
+            "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1,
             "spiMultiplier": 1,
@@ -244,12 +304,12 @@
             "id": "wf_st_poison",
             "name": "剧毒",
             "icon": "☠️",
-            "description": "每回合扣血并损耗 MP，加深侵蚀槽",
+            "description": "每回合扣血并损耗 MP，略微降低双攻",
             "skipTurn": false,
             "perTurnHp": -10,
             "perTurnMp": -5,
             "perTurnGaugeA": 0,
-            "perTurnGaugeB": 12,
+            "perTurnGaugeB": 0,
             "atkMultiplier": 0.9,
             "spiMultiplier": 0.9,
             "defMultiplier": 1,
@@ -282,7 +342,7 @@
             "skipTurn": true,
             "perTurnHp": -6,
             "perTurnMp": 0,
-            "perTurnGaugeA": -10,
+            "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1,
             "spiMultiplier": 1,
@@ -295,12 +355,12 @@
             "id": "wf_st_fear",
             "name": "恐惧",
             "icon": "👻",
-            "description": "心神震慑：跳过行动并增加腐化侵蚀",
+            "description": "心神震慑：跳过行动并损耗 MP 与法抗",
             "skipTurn": true,
             "perTurnHp": 0,
             "perTurnMp": -6,
             "perTurnGaugeA": 0,
-            "perTurnGaugeB": 15,
+            "perTurnGaugeB": 0,
             "atkMultiplier": 0.85,
             "spiMultiplier": 0.85,
             "defMultiplier": 1,
@@ -316,7 +376,7 @@
             "skipTurn": false,
             "perTurnHp": 0,
             "perTurnMp": 0,
-            "perTurnGaugeA": 5,
+            "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1,
             "spiMultiplier": 1,
@@ -334,7 +394,7 @@
             "perTurnHp": 0,
             "perTurnMp": -4,
             "perTurnGaugeA": 0,
-            "perTurnGaugeB": 10,
+            "perTurnGaugeB": 0,
             "atkMultiplier": 0.85,
             "spiMultiplier": 0.85,
             "defMultiplier": 0.75,
@@ -346,12 +406,12 @@
             "id": "wf_st_blight",
             "name": "凋零瘟疫",
             "icon": "💀",
-            "description": "亡灵死气侵蚀：每回合掉血并大幅降低法抗",
+            "description": "亡灵死气缠身：每回合掉血并大幅降低法抗",
             "skipTurn": false,
             "perTurnHp": -12,
             "perTurnMp": 0,
             "perTurnGaugeA": 0,
-            "perTurnGaugeB": 12,
+            "perTurnGaugeB": 0,
             "atkMultiplier": 1,
             "spiMultiplier": 0.9,
             "defMultiplier": 1,
@@ -367,7 +427,7 @@
             "skipTurn": false,
             "perTurnHp": 0,
             "perTurnMp": 0,
-            "perTurnGaugeA": 15,
+            "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1.55,
             "spiMultiplier": 1,
@@ -384,7 +444,7 @@
             "skipTurn": false,
             "perTurnHp": 0,
             "perTurnMp": -5,
-            "perTurnGaugeA": -15,
+            "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 0.8,
             "spiMultiplier": 0.8,
@@ -402,7 +462,7 @@
             "perTurnHp": 8,
             "perTurnMp": 0,
             "perTurnGaugeA": 0,
-            "perTurnGaugeB": -8,
+            "perTurnGaugeB": 0,
             "atkMultiplier": 1,
             "spiMultiplier": 1,
             "defMultiplier": 1.3,
@@ -418,7 +478,7 @@
             "skipTurn": false,
             "perTurnHp": 0,
             "perTurnMp": 6,
-            "perTurnGaugeA": 5,
+            "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1.25,
             "spiMultiplier": 1.25,
@@ -452,7 +512,7 @@
             "skipTurn": false,
             "perTurnHp": -5,
             "perTurnMp": 0,
-            "perTurnGaugeA": 8,
+            "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1,
             "spiMultiplier": 1,
@@ -475,7 +535,7 @@
             "perTurnHp": 0,
             "perTurnMp": -5,
             "perTurnGaugeA": 0,
-            "perTurnGaugeB": 12,
+            "perTurnGaugeB": 0,
             "atkMultiplier": 1,
             "spiMultiplier": 1,
             "defMultiplier": 1,
@@ -495,14 +555,14 @@
             "worldview": "西幻",
             "poolType": "universal",
             "name": "武器平砍",
-            "description": "通用物理普攻，0 消耗积攒战意",
+            "description": "通用物理普攻，0 消耗稳定造成物理伤害",
             "mpCost": 0,
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, atk * 1.0 - target_def * 0.4)",
-            "selfGaugeAChange": 8,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 5,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
@@ -521,9 +581,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, spi * 0.95 - target_mdef * 0.4)",
-            "selfGaugeAChange": 6,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 5,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
@@ -537,13 +597,13 @@
             "worldview": "西幻",
             "poolType": "universal",
             "name": "稳固架势",
-            "description": "通用防御技：获得圣盾庇护并缓和战意/侵蚀",
+            "description": "通用防御技：获得圣盾庇护，提升双抗并持续回血",
             "mpCost": 8,
             "targetType": "self",
             "effectType": "utility",
             "formula": "0",
-            "selfGaugeAChange": -12,
-            "selfGaugeBChange": -10,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
             "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_aegis",
@@ -563,8 +623,8 @@
             "targetType": "self",
             "effectType": "mp_restore",
             "formula": "max(15, spi * 0.8 + 12)",
-            "selfGaugeAChange": -10,
-            "selfGaugeBChange": -10,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
             "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "",
@@ -586,7 +646,7 @@
             "formula": "max(18, spi * 0.7 + 18)",
             "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": -8,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
@@ -605,9 +665,9 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, atk * 0.5 + level * 2)",
-            "selfGaugeAChange": 10,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 10,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_sunder",
             "applyStatusChance": 55,
@@ -616,7 +676,6 @@
             "aiPriority": 30,
             "aiHpBelowPercent": 100
         },
-
         {
             "id": "wf_c_war_shieldbash",
             "worldview": "西幻",
@@ -627,9 +686,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, atk * 1.25 + def * 0.4 - target_def * 0.35)",
-            "selfGaugeAChange": 10,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 10,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_sunder",
             "applyStatusChance": 85,
@@ -648,9 +707,9 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, atk * 1.15 - target_def * 0.35)",
-            "selfGaugeAChange": 12,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 8,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_bleed",
             "applyStatusChance": 45,
@@ -669,18 +728,21 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, atk * 2.35 - target_def * 0.2)",
-            "selfGaugeAChange": 15,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 15,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
             "applyStatusTarget": "target",
-            "requiredTargetStatusIds": ["wf_st_sunder", "wf_st_bleed", "wf_st_stun"],
+            "requiredTargetStatusIds": [
+                "wf_st_sunder",
+                "wf_st_bleed",
+                "wf_st_stun"
+            ],
             "aiPriority": 95,
             "aiHpBelowPercent": 100
         },
-
         {
             "id": "wf_c_bar_cleave",
             "worldview": "西幻",
@@ -691,9 +753,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, atk * 1.55 - target_def * 0.35)",
-            "selfGaugeAChange": 15,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 12,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_bleed",
             "applyStatusChance": 75,
@@ -712,7 +774,7 @@
             "targetType": "self",
             "effectType": "utility",
             "formula": "0",
-            "selfGaugeAChange": 25,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
             "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
@@ -733,9 +795,9 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, atk * 1.4 - target_def * 0.3)",
-            "selfGaugeAChange": 15,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 15,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_stun",
             "applyStatusChance": 65,
@@ -744,7 +806,6 @@
             "aiPriority": 80,
             "aiHpBelowPercent": 100
         },
-
         {
             "id": "wf_c_pal_smite",
             "worldview": "西幻",
@@ -755,9 +816,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, atk * 1.0 + spi * 0.85 - (target_def + target_mdef) * 0.25)",
-            "selfGaugeAChange": 10,
-            "selfGaugeBChange": -8,
-            "targetGaugeAChange": 10,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
@@ -776,10 +837,10 @@
             "targetType": "all_allies",
             "effectType": "heal",
             "formula": "max(10, spi * 0.7 + 10)",
-            "selfGaugeAChange": 5,
-            "selfGaugeBChange": -10,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
             "targetGaugeAChange": 0,
-            "targetGaugeBChange": -10,
+            "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_aegis",
             "applyStatusChance": 100,
             "applyStatusTarget": "target",
@@ -797,9 +858,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, atk * 1.2 + spi * 1.2 - target_mdef * 0.3)",
-            "selfGaugeAChange": 12,
-            "selfGaugeBChange": -10,
-            "targetGaugeAChange": 15,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_stun",
             "applyStatusChance": 75,
@@ -808,7 +869,6 @@
             "aiPriority": 85,
             "aiHpBelowPercent": 100
         },
-
         {
             "id": "wf_c_rng_pierce",
             "worldview": "西幻",
@@ -819,9 +879,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, atk * 1.35 - target_def * 0.2)",
-            "selfGaugeAChange": 10,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 8,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_bleed",
             "applyStatusChance": 85,
@@ -840,9 +900,9 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, atk * 1.15 - target_def * 0.3)",
-            "selfGaugeAChange": 10,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 8,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_bleed",
             "applyStatusChance": 50,
@@ -861,32 +921,35 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, atk * 2.4 - target_def * 0.15)",
-            "selfGaugeAChange": 12,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 15,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
             "applyStatusTarget": "target",
-            "requiredTargetStatusIds": ["wf_st_bleed", "wf_st_sunder", "wf_st_freeze"],
+            "requiredTargetStatusIds": [
+                "wf_st_bleed",
+                "wf_st_sunder",
+                "wf_st_freeze"
+            ],
             "aiPriority": 95,
             "aiHpBelowPercent": 100
         },
-
         {
             "id": "wf_c_pri_heal",
             "worldview": "西幻",
             "poolType": "class",
             "name": "圣光疗愈",
-            "description": "牧师技：以精神大幅回复单体友方生命并驱散侵蚀",
+            "description": "牧师技：以精神大幅回复单体友方生命",
             "mpCost": 14,
             "targetType": "single_ally",
             "effectType": "heal",
             "formula": "max(25, spi * 1.8 + 20)",
-            "selfGaugeAChange": 5,
-            "selfGaugeBChange": -5,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
             "targetGaugeAChange": 0,
-            "targetGaugeBChange": -15,
+            "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
             "applyStatusTarget": "target",
@@ -904,10 +967,10 @@
             "targetType": "all_allies",
             "effectType": "heal",
             "formula": "max(15, spi * 1.2 + 12)",
-            "selfGaugeAChange": 8,
-            "selfGaugeBChange": -10,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
             "targetGaugeAChange": 0,
-            "targetGaugeBChange": -15,
+            "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_aegis",
             "applyStatusChance": 100,
             "applyStatusTarget": "target",
@@ -925,9 +988,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, spi * 1.65 - target_mdef * 0.3)",
-            "selfGaugeAChange": 8,
-            "selfGaugeBChange": -8,
-            "targetGaugeAChange": 10,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_curse",
             "applyStatusChance": 65,
@@ -936,7 +999,6 @@
             "aiPriority": 50,
             "aiHpBelowPercent": 100
         },
-
         {
             "id": "wf_c_sha_hex",
             "worldview": "西幻",
@@ -947,10 +1009,10 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, spi * 1.2 - target_mdef * 0.35)",
-            "selfGaugeAChange": 8,
-            "selfGaugeBChange": 5,
-            "targetGaugeAChange": 10,
-            "targetGaugeBChange": 15,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_curse",
             "applyStatusChance": 90,
             "applyStatusTarget": "target",
@@ -968,9 +1030,9 @@
             "targetType": "all_allies",
             "effectType": "utility",
             "formula": "0",
-            "selfGaugeAChange": 10,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 5,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_totem",
             "applyStatusChance": 100,
@@ -989,18 +1051,21 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, spi * 2.3 - target_mdef * 0.2)",
-            "selfGaugeAChange": 12,
-            "selfGaugeBChange": 10,
-            "targetGaugeAChange": 15,
-            "targetGaugeBChange": 15,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
             "applyStatusTarget": "target",
-            "requiredTargetStatusIds": ["wf_st_curse", "wf_st_blight", "wf_st_poison"],
+            "requiredTargetStatusIds": [
+                "wf_st_curse",
+                "wf_st_blight",
+                "wf_st_poison"
+            ],
             "aiPriority": 95,
             "aiHpBelowPercent": 100
         },
-
         {
             "id": "wf_c_mag_missile",
             "worldview": "西幻",
@@ -1011,9 +1076,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, spi * 1.45 - target_mdef * 0.35)",
-            "selfGaugeAChange": 10,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 8,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
@@ -1032,8 +1097,8 @@
             "targetType": "self",
             "effectType": "mp_restore",
             "formula": "max(20, spi * 0.9 + 15)",
-            "selfGaugeAChange": 5,
-            "selfGaugeBChange": -5,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
             "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_arcanemind",
@@ -1043,7 +1108,6 @@
             "aiPriority": 60,
             "aiHpBelowPercent": 100
         },
-
         {
             "id": "wf_c_ele_fireburst",
             "worldview": "西幻",
@@ -1054,9 +1118,9 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, spi * 1.4 - target_mdef * 0.35)",
-            "selfGaugeAChange": 15,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 12,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_burn",
             "applyStatusChance": 80,
@@ -1075,9 +1139,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, spi * 1.55 - target_mdef * 0.3)",
-            "selfGaugeAChange": 10,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": -10,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_freeze",
             "applyStatusChance": 75,
@@ -1097,18 +1161,20 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, spi * 2.25 - target_mdef * 0.25)",
-            "selfGaugeAChange": 20,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 20,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_burn",
             "applyStatusChance": 80,
             "applyStatusTarget": "target",
-            "requiredTargetStatusIds": ["wf_st_burn", "wf_st_freeze"],
+            "requiredTargetStatusIds": [
+                "wf_st_burn",
+                "wf_st_freeze"
+            ],
             "aiPriority": 98,
             "aiHpBelowPercent": 100
         },
-
         {
             "id": "wf_c_nec_blight",
             "worldview": "西幻",
@@ -1119,10 +1185,10 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, spi * 1.3 - target_mdef * 0.3)",
-            "selfGaugeAChange": 10,
-            "selfGaugeBChange": 12,
-            "targetGaugeAChange": 8,
-            "targetGaugeBChange": 15,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_blight",
             "applyStatusChance": 85,
             "applyStatusTarget": "target",
@@ -1141,10 +1207,10 @@
             "effectType": "damage",
             "formula": "max(1, spi * 1.65 - target_mdef * 0.25)",
             "selfHpFormula": "max(10, spi * 0.55)",
-            "selfGaugeAChange": 8,
-            "selfGaugeBChange": 8,
-            "targetGaugeAChange": 10,
-            "targetGaugeBChange": 12,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_curse",
             "applyStatusChance": 70,
             "applyStatusTarget": "target",
@@ -1163,18 +1229,20 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, spi * 2.15 - target_mdef * 0.2)",
-            "selfGaugeAChange": 15,
-            "selfGaugeBChange": 20,
-            "targetGaugeAChange": 15,
-            "targetGaugeBChange": 20,
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_fear",
             "applyStatusChance": 65,
             "applyStatusTarget": "target",
-            "requiredTargetStatusIds": ["wf_st_blight", "wf_st_curse"],
+            "requiredTargetStatusIds": [
+                "wf_st_blight",
+                "wf_st_curse"
+            ],
             "aiPriority": 98,
             "aiHpBelowPercent": 100
         },
-
         {
             "id": "wf_m_claw",
             "worldview": "西幻",
@@ -1185,9 +1253,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, atk * 1.15 - target_def * 0.4)",
-            "selfGaugeAChange": 8,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 10,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_bleed",
             "applyStatusChance": 45,
@@ -1206,9 +1274,9 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, atk * 1.5 - target_def * 0.35)",
-            "selfGaugeAChange": 12,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 15,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_stun",
             "applyStatusChance": 45,
@@ -1227,10 +1295,10 @@
             "targetType": "single_enemy",
             "effectType": "damage",
             "formula": "max(1, spi * 1.35 - target_mdef * 0.35)",
-            "selfGaugeAChange": 8,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 8,
-            "targetGaugeBChange": 15,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_curse",
             "applyStatusChance": 55,
             "applyStatusTarget": "target",
@@ -1248,10 +1316,10 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, spi * 1.05 - target_mdef * 0.35)",
-            "selfGaugeAChange": 10,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 8,
-            "targetGaugeBChange": 18,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_poison",
             "applyStatusChance": 70,
             "applyStatusTarget": "target",
@@ -1269,9 +1337,9 @@
             "targetType": "all_allies",
             "effectType": "utility",
             "formula": "0",
-            "selfGaugeAChange": 10,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 10,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_totem",
             "applyStatusChance": 100,
@@ -1285,15 +1353,15 @@
             "worldview": "西幻",
             "poolType": "monster",
             "name": "深渊低语",
-            "description": "怪物控场技：大幅推高我方侵蚀槽并概率恐惧",
+            "description": "怪物控场技：暗影低语造成全体法伤并概率恐惧",
             "mpCost": 20,
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, spi * 0.9 - target_mdef * 0.3)",
-            "selfGaugeAChange": 10,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 10,
-            "targetGaugeBChange": 25,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_fear",
             "applyStatusChance": 45,
             "applyStatusTarget": "target",
@@ -1333,10 +1401,10 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "max(1, (atk * 0.5 + spi * 1.45) - target_mdef * 0.3)",
-            "selfGaugeAChange": 20,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 20,
-            "targetGaugeBChange": 15,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_burn",
             "applyStatusChance": 85,
             "applyStatusTarget": "target",
@@ -1356,12 +1424,16 @@
             "effectType": "damage",
             "formula": "max(1, atk * 0.7 - target_def * 0.3)",
             "selfHpFormula": "0",
-            "selfGaugeAChange": 5,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
-            "targetGaugeAChange": 15,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatuses": [
-                { "statusId": "wf_st_bind_phys", "chance": 90, "target": "target" }
+                {
+                    "statusId": "wf_st_bind_phys",
+                    "chance": 90,
+                    "target": "target"
+                }
             ],
             "requiredTargetStatusIds": [],
             "requiredSelfStatusIds": [],
@@ -1380,12 +1452,16 @@
             "effectType": "utility",
             "formula": "0",
             "selfHpFormula": "0",
-            "selfGaugeAChange": 8,
+            "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
             "targetGaugeAChange": 0,
-            "targetGaugeBChange": 15,
+            "targetGaugeBChange": 0,
             "applyStatuses": [
-                { "statusId": "wf_st_bind_cage", "chance": 100, "target": "target" }
+                {
+                    "statusId": "wf_st_bind_cage",
+                    "chance": 100,
+                    "target": "target"
+                }
             ],
             "requiredTargetStatusIds": [],
             "requiredSelfStatusIds": [],
@@ -1489,7 +1565,7 @@
             "targetType": "single_ally",
             "effectType": "heal",
             "formula": "55",
-            "targetGaugeAChange": -10,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
@@ -1514,13 +1590,13 @@
             "id": "wf_it_holywater",
             "name": "净魔圣水",
             "icon": "💧",
-            "description": "清除单体友方临时异常状态并大幅降低腐化侵蚀",
+            "description": "清除单体友方全部临时异常状态",
             "quantity": 2,
             "targetType": "single_ally",
             "effectType": "cleanse",
             "formula": "0",
-            "targetGaugeAChange": -15,
-            "targetGaugeBChange": -35,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
             "consumesTurn": false
@@ -1534,7 +1610,7 @@
             "targetType": "all_enemies",
             "effectType": "damage",
             "formula": "35",
-            "targetGaugeAChange": 15,
+            "targetGaugeAChange": 0,
             "targetGaugeBChange": 0,
             "applyStatusId": "wf_st_burn",
             "applyStatusChance": 75,
@@ -1550,7 +1626,13 @@
             "level": 2,
             "classId": "wf_warrior",
             "freePoints": 3,
-            "allocated": { "vit": 0, "str": 0, "spi": 0, "def": 0, "mdef": 0 },
+            "allocated": {
+                "vit": 0,
+                "str": 0,
+                "spi": 0,
+                "def": 0,
+                "mdef": 0
+            },
             "maxHp": 130,
             "maxMp": 50,
             "atk": 24,
@@ -1559,8 +1641,13 @@
             "mdef": 8,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
-            "skillIds": ["wf_u_strike", "wf_u_guard"],
-            "equipmentIds": ["wf_eq_sword"],
+            "skillIds": [
+                "wf_u_strike",
+                "wf_u_guard"
+            ],
+            "equipmentIds": [
+                "wf_eq_sword"
+            ],
             "aiStrategy": "priority",
             "autoControl": false
         },
@@ -1572,7 +1659,13 @@
             "level": 3,
             "classId": "wf_mage_elemental",
             "freePoints": 3,
-            "allocated": { "vit": 0, "str": 0, "spi": 0, "def": 0, "mdef": 0 },
+            "allocated": {
+                "vit": 0,
+                "str": 0,
+                "spi": 0,
+                "def": 0,
+                "mdef": 0
+            },
             "maxHp": 95,
             "maxMp": 85,
             "atk": 10,
@@ -1581,8 +1674,13 @@
             "mdef": 14,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
-            "skillIds": ["wf_u_bolt"],
-            "equipmentIds": ["wf_eq_staff", "wf_eq_wizardhat"],
+            "skillIds": [
+                "wf_u_bolt"
+            ],
+            "equipmentIds": [
+                "wf_eq_staff",
+                "wf_eq_wizardhat"
+            ],
             "aiStrategy": "priority",
             "autoControl": true
         },
@@ -1594,7 +1692,13 @@
             "level": 2,
             "classId": "wf_priest",
             "freePoints": 3,
-            "allocated": { "vit": 0, "str": 0, "spi": 0, "def": 0, "mdef": 0 },
+            "allocated": {
+                "vit": 0,
+                "str": 0,
+                "spi": 0,
+                "def": 0,
+                "mdef": 0
+            },
             "maxHp": 105,
             "maxMp": 90,
             "atk": 11,
@@ -1603,7 +1707,10 @@
             "mdef": 15,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
-            "skillIds": ["wf_u_bolt", "wf_u_meditate"],
+            "skillIds": [
+                "wf_u_bolt",
+                "wf_u_meditate"
+            ],
             "equipmentIds": [],
             "aiStrategy": "priority",
             "autoControl": true
@@ -1616,7 +1723,13 @@
             "level": 2,
             "classId": "wf_ranger",
             "freePoints": 3,
-            "allocated": { "vit": 0, "str": 0, "spi": 0, "def": 0, "mdef": 0 },
+            "allocated": {
+                "vit": 0,
+                "str": 0,
+                "spi": 0,
+                "def": 0,
+                "mdef": 0
+            },
             "maxHp": 110,
             "maxMp": 60,
             "atk": 25,
@@ -1625,8 +1738,13 @@
             "mdef": 10,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
-            "skillIds": ["wf_u_strike", "wf_u_firstaid"],
-            "equipmentIds": ["wf_eq_cloak"],
+            "skillIds": [
+                "wf_u_strike",
+                "wf_u_firstaid"
+            ],
+            "equipmentIds": [
+                "wf_eq_cloak"
+            ],
             "aiStrategy": "priority",
             "autoControl": true
         }
@@ -1646,7 +1764,10 @@
             "mdef": 5,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
-            "skillIds": ["wf_m_claw", "wf_m_howl"],
+            "skillIds": [
+                "wf_m_claw",
+                "wf_m_howl"
+            ],
             "equipmentIds": [],
             "aiStrategy": "weighted"
         },
@@ -1664,7 +1785,10 @@
             "mdef": 5,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
-            "skillIds": ["wf_m_claw", "wf_m_smash"],
+            "skillIds": [
+                "wf_m_claw",
+                "wf_m_smash"
+            ],
             "equipmentIds": [],
             "aiStrategy": "priority"
         },
@@ -1682,7 +1806,12 @@
             "mdef": 10,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
-            "skillIds": ["wf_m_claw", "wf_m_poison", "wf_m_bind_vine", "wf_m_howl"],
+            "skillIds": [
+                "wf_m_claw",
+                "wf_m_poison",
+                "wf_m_bind_vine",
+                "wf_m_howl"
+            ],
             "equipmentIds": [],
             "aiStrategy": "weighted"
         },
@@ -1700,7 +1829,12 @@
             "mdef": 16,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
-            "skillIds": ["wf_m_darkbolt", "wf_m_curse", "wf_m_bind_cage", "wf_m_regen"],
+            "skillIds": [
+                "wf_m_darkbolt",
+                "wf_m_curse",
+                "wf_m_bind_cage",
+                "wf_m_regen"
+            ],
             "equipmentIds": [],
             "aiStrategy": "priority"
         },
@@ -1718,7 +1852,13 @@
             "mdef": 16,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
-            "skillIds": ["wf_m_claw", "wf_m_smash", "wf_m_poison", "wf_m_regen", "wf_m_breath"],
+            "skillIds": [
+                "wf_m_claw",
+                "wf_m_smash",
+                "wf_m_poison",
+                "wf_m_regen",
+                "wf_m_breath"
+            ],
             "equipmentIds": [],
             "aiStrategy": "priority"
         }

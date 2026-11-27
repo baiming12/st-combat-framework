@@ -771,23 +771,58 @@ export function createBattleState(config, overrideEnemies = null) {
 }
 
 /**
- * 修改单位某项特殊计量条，并返回变化描述（v1.8 支持任意自定义状态槽与自定义 min/max）
+ * 计算单位当前所有 Buff/Debuff 对指定状态槽增减的累计倍率
+ * @param {object} unit
+ * @param {string} gaugeKey
+ * @param {number} delta 正数=增加，负数=减少
+ * @param {object} config
+ * @returns {number}
+ */
+export function getUnitGaugeChangeMultiplier(unit, gaugeKey, delta, config) {
+    if (!unit || !delta) return 1;
+    const dir = delta > 0 ? 'gain' : 'loss';
+    let mult = 1;
+    for (const activeSt of unit.statuses || []) {
+        const def = findStatusDefById(config, activeSt.statusId);
+        if (!def || !Array.isArray(def.gaugeChangeMultipliers)) continue;
+        for (const rule of def.gaugeChangeMultipliers) {
+            if (!rule) continue;
+            const matchGauge = rule.gaugeId === '_all' || rule.gaugeId === gaugeKey;
+            const matchDir = rule.direction === 'both' || rule.direction === dir;
+            if (matchGauge && matchDir && Number.isFinite(Number(rule.multiplier)) && Number(rule.multiplier) >= 0) {
+                mult *= Number(rule.multiplier);
+            }
+        }
+    }
+    return Number(mult.toFixed(3));
+}
+
+/**
+ * 修改单位某项特殊计量条，并返回变化描述（v1.8 支持任意自定义状态槽、自定义 min/max 与 Buff 增减倍率）
  */
 function applyGaugeDelta(unit, gaugeKey, delta, config) {
-    const num = Math.round(Number(delta) || 0);
-    if (num === 0) return '';
+    const rawNum = Math.round(Number(delta) || 0);
+    if (rawNum === 0) return '';
     const gDef = config.gauges?.[gaugeKey];
     const gMin = Number.isFinite(Number(gDef?.min)) ? Number(gDef.min) : 0;
     const gMax = Number.isFinite(Number(gDef?.max)) ? Number(gDef.max) : 100;
+    const gaugeName = gDef?.name || gaugeKey;
+
+    const mult = getUnitGaugeChangeMultiplier(unit, gaugeKey, rawNum, config);
+    const num = mult === 1 ? rawNum : Math.round(rawNum * mult);
+    if (num === 0) {
+        return mult === 0 ? `${gaugeName}变化被状态阻挡(×0)` : '';
+    }
+
     if (!unit.gauges || typeof unit.gauges !== 'object') unit.gauges = {};
     const before = Number.isFinite(Number(unit.gauges[gaugeKey])) ? Number(unit.gauges[gaugeKey]) : gMin;
     const after = clamp(before + num, gMin, gMax);
     unit.gauges[gaugeKey] = after;
     const actualDelta = after - before;
     if (actualDelta === 0) return '';
-    const gaugeName = gDef?.name || gaugeKey;
     const sign = actualDelta > 0 ? '+' : '';
-    return `${gaugeName}${sign}${actualDelta}(${after}/${gMax})`;
+    const multNote = mult !== 1 ? `(×${Number(mult.toFixed(2))})` : '';
+    return `${gaugeName}${sign}${actualDelta}${multNote}(${after}/${gMax})`;
 }
 
 /** 批量应用多条自定义状态槽增减（向下兼容旧版 gauge_a / gauge_b 独立字段） */

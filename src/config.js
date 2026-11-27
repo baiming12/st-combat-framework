@@ -73,6 +73,26 @@ function normalizeGaugeDeltaMap(rawMap, legacyA, legacyB) {
     return map;
 }
 
+/** 规范化状态的“状态槽增减倍率”列表（支持全部状态槽 _all 或指定槽位 ID，按 增/减/全部 生效） */
+function normalizeGaugeMultipliers(rawList) {
+    if (!Array.isArray(rawList)) return [];
+    return rawList
+        .filter(x => x && typeof x === 'object')
+        .map(x => {
+            const rawId = String(x.gaugeId || '_all').trim().toLowerCase();
+            const gaugeId = (!rawId || rawId === 'all' || rawId === '*' || rawId === '_all')
+                ? '_all'
+                : sanitizeGaugeId(rawId, '_all');
+            const direction = ['gain', 'loss', 'both'].includes(x.direction) ? x.direction : 'both';
+            const mult = Number(x.multiplier);
+            return {
+                gaugeId,
+                direction,
+                multiplier: Number.isFinite(mult) && mult >= 0 ? Number(mult.toFixed(2)) : 1,
+            };
+        });
+}
+
 /** 缓存读取到的默认配置 */
 let cachedDefaultConfig = null;
 
@@ -493,6 +513,7 @@ export function normalizeConfig(rawConfig, defaults) {
             perTurnGaugeA: perTurnGauges.gauge_a ?? 0,
             perTurnGaugeB: perTurnGauges.gauge_b ?? 0,
             perTurnGauges,
+            gaugeChangeMultipliers: normalizeGaugeMultipliers(st?.gaugeChangeMultipliers),
             atkMultiplier: Number.isFinite(Number(st?.atkMultiplier)) ? Number(st.atkMultiplier) : 1,
             spiMultiplier: Number.isFinite(Number(st?.spiMultiplier)) ? Number(st.spiMultiplier) : 1,
             defMultiplier: Number.isFinite(Number(st?.defMultiplier)) ? Number(st.defMultiplier) : 1,
