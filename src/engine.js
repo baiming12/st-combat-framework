@@ -348,16 +348,14 @@ export function getEffectiveStats(unit, config) {
     for (const activeSt of unit.statuses || []) {
         const def = findStatusDefById(config, activeSt.statusId);
         if (!def) continue;
-        if (def.effectType === 'skip_turn') {
+        if (def.skipTurn || def.effectType === 'skip_turn') {
             isStunned = true;
         }
-        if (def.effectType === 'stat_mod' || def.atkMultiplier !== 1 || def.defMultiplier !== 1) {
-            if (Number.isFinite(def.atkMultiplier) && def.atkMultiplier > 0) {
-                atkMultiplier *= def.atkMultiplier;
-            }
-            if (Number.isFinite(def.defMultiplier) && def.defMultiplier > 0) {
-                defMultiplier *= def.defMultiplier;
-            }
+        if (Number.isFinite(def.atkMultiplier) && def.atkMultiplier > 0 && def.atkMultiplier !== 1) {
+            atkMultiplier *= def.atkMultiplier;
+        }
+        if (Number.isFinite(def.defMultiplier) && def.defMultiplier > 0 && def.defMultiplier !== 1) {
+            defMultiplier *= def.defMultiplier;
         }
     }
 
@@ -923,55 +921,125 @@ function runEnemyTurnAndRoundEnd(state, config) {
 }
 
 function runRoundEndSettlement(state, config) {
+    const gADef = config.gauges?.gauge_a;
+    const gBDef = config.gauges?.gauge_b;
+
+    const shouldApplyGaugeTick = (gaugeDef, unit) => {
+        if (!gaugeDef || !Number(gaugeDef.perTurnChange)) return false;
+        const scope = gaugeDef.perTurnScope || 'all';
+        if (scope === 'allies') return unit.side === 'ally';
+        if (scope === 'enemies') return unit.side === 'enemy';
+        return true;
+    };
+
     for (const unit of getAllUnits(state)) {
-        if (!isAlive(unit) || !unit.statuses || unit.statuses.length === 0) continue;
+        if (!isAlive(unit)) continue;
 
-        const remainingStatuses = [];
+        // 1. 结算角色身上所有 Buff/Debuff 的组合效果与倒计时（含到期转化）
+        if (unit.statuses && unit.statuses.length > 0) {
+            const remainingStatuses = [];
+            const transformedStatuses = [];
 
-        for (const activeSt of unit.statuses) {
-            const def = findStatusDefById(config, activeSt.statusId);
-            if (!def) continue;
+            for (const activeSt of unit.statuses) {
+                const def = findStatusDefById(config, activeSt.statusId);
+                if (!def) continue;
 
-            if ((def.effectType === 'dot_hot' || def.value !== 0) && Number(def.value) !== 0) {
-                const val = Math.round(Number(def.value));
-                if (def.targetStat === 'hp') {
+                // 兼容 v1.2 多属性组合变化（同时影响 HP、MP、状态槽A、状态槽B）
+                const hpDelta = Math.round(Number(def.perTurnHp ?? (def.targetStat === 'hp' ? def.value : 0)) || 0);
+                const mpDelta = Math.round(Number(def.perTurnMp ?? (def.targetStat === 'mp' ? def.value : 0)) || 0);
+                const gADelta = Math.round(Number(def.perTurnGaugeA ?? (def.targetStat === 'gauge_a' ? def.value : 0)) || 0);
+                const gBDelta = Math.round(Number(def.perTurnGaugeB ?? (def.targetStat === 'gauge_b' ? def.value : 0)) || 0);
+
+                const tickNotes = [];
+                if (hpDelta !== 0) {
                     const before = unit.hp;
-                    unit.hp = clamp(unit.hp + val, 0, unit.maxHp);
+                    unit.hp = clamp(unit.hp + hpDelta, 0, unit.maxHp);
                     const diff = unit.hp - before;
-                    if (diff < 0) {
-                        appendBattleLog(state, `${unit.name} 因「${def.name}」受到 ${Math.abs(diff)} 点持续伤害（HP ${unit.hp}/${unit.maxHp}）。`);
-                    } else if (diff > 0) {
-                        appendBattleLog(state, `${unit.name} 因「${def.name}」回复 ${diff} 点 HP（HP ${unit.hp}/${unit.maxHp}）。`);
-                    }
-                    if (unit.hp <= 0) appendBattleLog(state, `${unit.name} 倒下了！`);
-                } else if (def.targetStat === 'mp') {
+                    if (diff < 0) tickNotes.push(`受到 ${Math.abs(diff)} 点持续伤害（HP ${unit.hp}/${unit.maxHp}）`);
+                    else if (diff > 0) tickNotes.push(`回复 ${diff} 点 HP（HP ${unit.hp}/${unit.maxHp}）`);
+                }
+                if (mpDelta !== 0) {
                     const before = unit.mp;
-                    unit.mp = clamp(unit.mp + val, 0, unit.maxMp);
+                    unit.mp = clamp(unit.mp + mpDelta, 0, unit.maxMp);
                     const diff = unit.mp - before;
-                    if (diff !== 0) {
-                        appendBattleLog(state, `${unit.name} 因「${def.name}」MP/体力 ${diff > 0 ? '+' : ''}${diff}（${unit.mp}/${unit.maxMp}）。`);
+                    if (diff !== 0) tickNotes.push(`MP ${diff > 0 ? '+' : ''}${diff}（${unit.mp}/${unit.maxMp}）`);
+                }
+                if (gADelta !== 0) {
+                    const note = applyGaugeDelta(unit, 'gauge_a', gADelta, config);
+                    if (note) tickNotes.push(note);
+                }
+                if (gBDelta !== 0) {
+                    const note = applyGaugeDelta(unit, 'gauge_b', gBDelta, config);
+                    if (note) tickNotes.push(note);
+                }
+
+                if (tickNotes.length > 0) {
+                    appendBattleLog(state, `${unit.name} 因「${def.name}」${tickNotes.join('，')}。`);
+                }
+                if (unit.hp <= 0) {
+                    appendBattleLog(state, `${unit.name} 倒下了！`);
+                }
+
+                // 装备常驻 Buff 与阈值维持态 Buff 不随回合倒计时消失
+                if (activeSt.source === 'equipment' || activeSt.source === 'threshold') {
+                    remainingStatuses.push(activeSt);
+                    continue;
+                }
+
+                activeSt.remainingTurns -= 1;
+                if (activeSt.remainingTurns > 0) {
+                    remainingStatuses.push(activeSt);
+                } else {
+                    // v1.2：状态倒计时结束时，支持自动转化为另一个新状态
+                    const nextDef = (isAlive(unit) && def.onExpireStatusId)
+                        ? findStatusDefById(config, def.onExpireStatusId)
+                        : null;
+                    if (nextDef) {
+                        transformedStatuses.push({
+                            statusId: nextDef.id,
+                            remainingTurns: nextDef.duration,
+                            source: 'normal',
+                        });
+                        appendBattleLog(
+                            state,
+                            `${unit.name} 的状态「${def.name}」结束，转化为「${nextDef.name}」(${nextDef.duration}回合)！`
+                        );
+                    } else {
+                        appendBattleLog(state, `${unit.name} 身上的状态「${def.name}」已失效移除。`);
                     }
-                } else if (def.targetStat === 'gauge_a' || def.targetStat === 'gauge_b') {
-                    const note = applyGaugeDelta(unit, def.targetStat, val, config);
-                    if (note) appendBattleLog(state, `${unit.name} 因「${def.name}」${note}。`);
                 }
             }
 
-            // 装备常驻 Buff 与阈值维持态 Buff 不随回合倒计时消失
-            if (activeSt.source === 'equipment' || activeSt.source === 'threshold') {
-                remainingStatuses.push(activeSt);
-                continue;
+            // 合并本回合结束转化出来的新状态（避免与已保留同名普通状态重复）
+            for (const nextSt of transformedStatuses) {
+                const exist = remainingStatuses.find(
+                    s => s.statusId === nextSt.statusId && (!s.source || s.source === 'normal')
+                );
+                if (exist) {
+                    exist.remainingTurns = Math.max(exist.remainingTurns, nextSt.remainingTurns);
+                } else {
+                    remainingStatuses.push(nextSt);
+                }
             }
 
-            activeSt.remainingTurns -= 1;
-            if (activeSt.remainingTurns > 0) {
-                remainingStatuses.push(activeSt);
-            } else {
-                appendBattleLog(state, `${unit.name} 身上的状态「${def.name}」已失效移除。`);
-            }
+            unit.statuses = remainingStatuses;
         }
 
-        unit.statuses = remainingStatuses;
+        // 2. v1.2：结算特殊状态条的每回合自动增减（仅对存活单位生效）
+        if (isAlive(unit)) {
+            const passiveGaugeNotes = [];
+            if (shouldApplyGaugeTick(gADef, unit)) {
+                const note = applyGaugeDelta(unit, 'gauge_a', gADef.perTurnChange, config);
+                if (note) passiveGaugeNotes.push(note);
+            }
+            if (shouldApplyGaugeTick(gBDef, unit)) {
+                const note = applyGaugeDelta(unit, 'gauge_b', gBDef.perTurnChange, config);
+                if (note) passiveGaugeNotes.push(note);
+            }
+            if (passiveGaugeNotes.length > 0) {
+                appendBattleLog(state, `回合结算：${unit.name} ${passiveGaugeNotes.join('，')}。`);
+            }
+        }
     }
 }
 

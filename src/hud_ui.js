@@ -512,7 +512,7 @@ export async function initHudUI(deps) {
                 sourceNote = `阈值规则「${st.sourceLabel || ''}」维持生效`;
                 extraClass = 'stcf-chip-threshold';
             }
-            const tip = `${def.name}（${sourceNote}）：${def.description || def.effectType}`;
+            const tip = `${def.name}（${sourceNote}）：${def.description || '组合状态效果'}`;
             return `<span class="stcf-status-chip ${extraClass}" title="${escapeHtml(tip)}">${escapeHtml(def.icon || '✨')} ${escapeHtml(def.name)} <b>${badgeText}</b></span>`;
         }).join('');
 

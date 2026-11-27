@@ -74,7 +74,7 @@
                 </div>
 
                 <div class="stcf-section-card">
-                    <div class="stcf-section-title">自定义特殊计量条（范围 0-100）</div>
+                    <div class="stcf-section-title">自定义特殊计量条（范围 0-100，支持每回合自动增减）</div>
                     <div class="stcf-grid-2">
                         <div class="stcf-field-row">
                             <label for="stcf-set-gauge-a-name">状态槽 A 显示名称：</label>
@@ -85,12 +85,37 @@
                             <input type="color" id="stcf-set-gauge-a-color" class="stcf-color-input">
                         </div>
                         <div class="stcf-field-row">
+                            <label for="stcf-set-gauge-a-tick">状态槽 A 每回合自动增减：</label>
+                            <input type="number" id="stcf-set-gauge-a-tick" class="text_pole" placeholder="0（正数增长，负数衰减）">
+                        </div>
+                        <div class="stcf-field-row">
+                            <label for="stcf-set-gauge-a-scope">状态槽 A 自动变化阵营：</label>
+                            <select id="stcf-set-gauge-a-scope" class="text_pole">
+                                <option value="all">敌我双方全员</option>
+                                <option value="allies">仅我方角色</option>
+                                <option value="enemies">仅敌方单位</option>
+                            </select>
+                        </div>
+
+                        <div class="stcf-field-row">
                             <label for="stcf-set-gauge-b-name">状态槽 B 显示名称：</label>
                             <input type="text" id="stcf-set-gauge-b-name" class="text_pole" placeholder="状态槽B">
                         </div>
                         <div class="stcf-field-row">
                             <label for="stcf-set-gauge-b-color">状态槽 B 进度条颜色：</label>
                             <input type="color" id="stcf-set-gauge-b-color" class="stcf-color-input">
+                        </div>
+                        <div class="stcf-field-row">
+                            <label for="stcf-set-gauge-b-tick">状态槽 B 每回合自动增减：</label>
+                            <input type="number" id="stcf-set-gauge-b-tick" class="text_pole" placeholder="0（正数增长，负数衰减）">
+                        </div>
+                        <div class="stcf-field-row">
+                            <label for="stcf-set-gauge-b-scope">状态槽 B 自动变化阵营：</label>
+                            <select id="stcf-set-gauge-b-scope" class="text_pole">
+                                <option value="all">敌我双方全员</option>
+                                <option value="allies">仅我方角色</option>
+                                <option value="enemies">仅敌方单位</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -192,7 +217,7 @@
                         <button type="button" id="stcf-btn-add-status" class="menu_button stcf-sm-btn">➕ 新增状态</button>
                     </div>
                     <div class="stcf-tip-box">
-                        普通技能附加的状态按<strong>持续回合数倒计时，归零自动移除</strong>；被装备常驻或阈值条件维持挂载的状态则会随穿脱/条件自动生效与解除。
+                        每个状态均可<strong>自由组合多种效果</strong>：可同时勾选跳过行动回合、设置每回合多属性变化（HP/MP/双状态槽）、攻防倍率，并可设置<strong>倒计时结束后自动转化为另一个状态</strong>（如“过载爆发”结束转为“力竭”）。
                     </div>
                     <div id="stcf-statuses-editor" class="stcf-editor-list"></div>
                 </div>

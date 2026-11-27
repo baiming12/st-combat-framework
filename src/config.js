@@ -192,26 +192,62 @@ export function normalizeConfig(rawConfig, defaults) {
     general.autoEndPlayerTurn = general.autoEndPlayerTurn !== false;
     general.hudStartCollapsed = general.hudStartCollapsed !== false;
 
-    // 2. 特殊计量条定义（固定 2 个：gauge_a、gauge_b，范围 0-100）
+    // 2. 特殊计量条定义（固定 2 个：gauge_a、gauge_b，范围 0-100，v1.2 支持每回合自动增减）
+    const normalizeGaugeDef = (rawG, baseG) => ({
+        ...baseG,
+        ...(rawG || {}),
+        min: 0,
+        max: 100,
+        perTurnChange: Number.isFinite(Number(rawG?.perTurnChange)) ? Math.round(Number(rawG.perTurnChange)) : (baseG.perTurnChange || 0),
+        perTurnScope: ['all', 'allies', 'enemies'].includes(rawG?.perTurnScope) ? rawG.perTurnScope : (baseG.perTurnScope || 'all'),
+    });
     const gauges = {
-        gauge_a: { ...base.gauges.gauge_a, ...(src.gauges?.gauge_a || {}), min: 0, max: 100 },
-        gauge_b: { ...base.gauges.gauge_b, ...(src.gauges?.gauge_b || {}), min: 0, max: 100 },
+        gauge_a: normalizeGaugeDef(src.gauges?.gauge_a, base.gauges.gauge_a),
+        gauge_b: normalizeGaugeDef(src.gauges?.gauge_b, base.gauges.gauge_b),
     };
 
-    // 3. 状态（Buff/Debuff）库
+    // 3. 状态（Buff/Debuff）库（v1.2 支持自由组合效果：跳过回合 + 多属性每回合变化 + 攻防倍率 + 到期转化）
     const rawStatuses = Array.isArray(src.statuses) ? src.statuses : base.statuses;
-    const statuses = rawStatuses.map((st, idx) => ({
-        id: String(st?.id || `status_${idx + 1}`).trim() || `status_${idx + 1}`,
-        name: String(st?.name ?? `status_${idx + 1}`).trim() || `status_${idx + 1}`,
-        icon: String(st?.icon || '✨'),
-        description: String(st?.description || ''),
-        effectType: ['dot_hot', 'skip_turn', 'stat_mod'].includes(st?.effectType) ? st.effectType : 'dot_hot',
-        targetStat: ['hp', 'mp', 'gauge_a', 'gauge_b'].includes(st?.targetStat) ? st.targetStat : 'hp',
-        value: Number.isFinite(Number(st?.value)) ? Number(st.value) : 0,
-        atkMultiplier: Number.isFinite(Number(st?.atkMultiplier)) ? Number(st.atkMultiplier) : 1,
-        defMultiplier: Number.isFinite(Number(st?.defMultiplier)) ? Number(st.defMultiplier) : 1,
-        duration: Math.max(1, Math.round(Number(st?.duration ?? 1) || 1)),
-    }));
+    const statuses = rawStatuses.map((st, idx) => {
+        // 向下兼容 v1.0/v1.1 的单字段 targetStat + value 以及 effectType === 'skip_turn'
+        const hasNewPerTurn = st && (
+            st.perTurnHp !== undefined || st.perTurnMp !== undefined
+            || st.perTurnGaugeA !== undefined || st.perTurnGaugeB !== undefined
+        );
+        const legacyVal = Number.isFinite(Number(st?.value)) ? Number(st.value) : 0;
+        const legacyStat = st?.targetStat || 'hp';
+
+        const perTurnHp = hasNewPerTurn
+            ? (Number.isFinite(Number(st?.perTurnHp)) ? Math.round(Number(st.perTurnHp)) : 0)
+            : (legacyStat === 'hp' ? Math.round(legacyVal) : 0);
+        const perTurnMp = hasNewPerTurn
+            ? (Number.isFinite(Number(st?.perTurnMp)) ? Math.round(Number(st.perTurnMp)) : 0)
+            : (legacyStat === 'mp' ? Math.round(legacyVal) : 0);
+        const perTurnGaugeA = hasNewPerTurn
+            ? (Number.isFinite(Number(st?.perTurnGaugeA)) ? Math.round(Number(st.perTurnGaugeA)) : 0)
+            : (legacyStat === 'gauge_a' ? Math.round(legacyVal) : 0);
+        const perTurnGaugeB = hasNewPerTurn
+            ? (Number.isFinite(Number(st?.perTurnGaugeB)) ? Math.round(Number(st.perTurnGaugeB)) : 0)
+            : (legacyStat === 'gauge_b' ? Math.round(legacyVal) : 0);
+
+        const skipTurn = st?.skipTurn !== undefined ? Boolean(st.skipTurn) : st?.effectType === 'skip_turn';
+
+        return {
+            id: String(st?.id || `status_${idx + 1}`).trim() || `status_${idx + 1}`,
+            name: String(st?.name ?? `status_${idx + 1}`).trim() || `status_${idx + 1}`,
+            icon: String(st?.icon || '✨'),
+            description: String(st?.description || ''),
+            skipTurn,
+            perTurnHp,
+            perTurnMp,
+            perTurnGaugeA,
+            perTurnGaugeB,
+            atkMultiplier: Number.isFinite(Number(st?.atkMultiplier)) ? Number(st.atkMultiplier) : 1,
+            defMultiplier: Number.isFinite(Number(st?.defMultiplier)) ? Number(st.defMultiplier) : 1,
+            duration: Math.max(1, Math.round(Number(st?.duration ?? 1) || 1)),
+            onExpireStatusId: String(st?.onExpireStatusId || ''),
+        };
+    });
 
     // 4. 技能库
     const rawSkills = Array.isArray(src.skills) ? src.skills : base.skills;

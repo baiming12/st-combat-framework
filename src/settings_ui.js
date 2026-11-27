@@ -102,8 +102,12 @@ export async function initSettingsUI(deps) {
     const elLogHeader = container.querySelector('#stcf-set-log-header');
     const elGaugeAName = container.querySelector('#stcf-set-gauge-a-name');
     const elGaugeAColor = container.querySelector('#stcf-set-gauge-a-color');
+    const elGaugeATick = container.querySelector('#stcf-set-gauge-a-tick');
+    const elGaugeAScope = container.querySelector('#stcf-set-gauge-a-scope');
     const elGaugeBName = container.querySelector('#stcf-set-gauge-b-name');
     const elGaugeBColor = container.querySelector('#stcf-set-gauge-b-color');
+    const elGaugeBTick = container.querySelector('#stcf-set-gauge-b-tick');
+    const elGaugeBScope = container.querySelector('#stcf-set-gauge-b-scope');
     const elPasteJson = container.querySelector('#stcf-paste-json');
 
     elEnabled.addEventListener('change', () => { deps.getConfig().general.enabled = elEnabled.checked; commitChange(); });
@@ -124,8 +128,12 @@ export async function initSettingsUI(deps) {
     elLogHeader.addEventListener('input', () => { deps.getConfig().general.logHeaderTemplate = elLogHeader.value; commitChange(); });
     elGaugeAName.addEventListener('input', () => { deps.getConfig().gauges.gauge_a.name = elGaugeAName.value || '状态槽A'; commitChange(); });
     elGaugeAColor.addEventListener('input', () => { deps.getConfig().gauges.gauge_a.color = elGaugeAColor.value; commitChange(); });
+    elGaugeATick.addEventListener('input', () => { deps.getConfig().gauges.gauge_a.perTurnChange = Math.round(Number(elGaugeATick.value) || 0); commitChange(); });
+    elGaugeAScope.addEventListener('change', () => { deps.getConfig().gauges.gauge_a.perTurnScope = elGaugeAScope.value; commitChange(); });
     elGaugeBName.addEventListener('input', () => { deps.getConfig().gauges.gauge_b.name = elGaugeBName.value || '状态槽B'; commitChange(); });
     elGaugeBColor.addEventListener('input', () => { deps.getConfig().gauges.gauge_b.color = elGaugeBColor.value; commitChange(); });
+    elGaugeBTick.addEventListener('input', () => { deps.getConfig().gauges.gauge_b.perTurnChange = Math.round(Number(elGaugeBTick.value) || 0); commitChange(); });
+    elGaugeBScope.addEventListener('change', () => { deps.getConfig().gauges.gauge_b.perTurnScope = elGaugeBScope.value; commitChange(); });
 
     // 粘贴 JSON 导入（增量合并 / 完整覆盖）
     async function handlePasteImport(mode) {
@@ -589,7 +597,7 @@ export async function initSettingsUI(deps) {
     bindSimpleListEvents(elItemsEditor, () => deps.getConfig().items, []);
 
     // =========================================================================
-    // 六、状态 / Buff 编辑器
+    // 六、状态 / Buff 编辑器（v1.2：自由组合效果 + 多属性每回合变化 + 到期转化）
     // =========================================================================
     const elStatusesEditor = container.querySelector('#stcf-statuses-editor');
     container.querySelector('#stcf-btn-add-status').addEventListener('click', () => {
@@ -598,13 +606,16 @@ export async function initSettingsUI(deps) {
             id: makeUniqueId('status', cfg.statuses),
             name: `新状态_${cfg.statuses.length + 1}`,
             icon: '✨',
-            description: '自定义状态说明',
-            effectType: 'dot_hot',
-            targetStat: 'hp',
-            value: -10,
+            description: '自定义组合状态说明',
+            skipTurn: false,
+            perTurnHp: -10,
+            perTurnMp: 0,
+            perTurnGaugeA: 0,
+            perTurnGaugeB: 0,
             atkMultiplier: 1,
             defMultiplier: 1,
             duration: 2,
+            onExpireStatusId: '',
         });
         commitChange(true);
     });
@@ -625,28 +636,24 @@ export async function initSettingsUI(deps) {
                 <div class="stcf-field-row">
                     <input type="text" class="text_pole" data-field="description" value="${escapeHtml(st.description)}" placeholder="状态效果说明">
                 </div>
-                <div class="stcf-grid-3">
-                    <label class="stcf-mini-field"><span>效果模板</span>
-                        <select class="text_pole" data-field="effectType">
-                            <option value="dot_hot" ${st.effectType === 'dot_hot' ? 'selected' : ''}>每回合持续增减属性</option>
-                            <option value="skip_turn" ${st.effectType === 'skip_turn' ? 'selected' : ''}>跳过行动回合(控制)</option>
-                            <option value="stat_mod" ${st.effectType === 'stat_mod' ? 'selected' : ''}>增减攻击/防御倍率</option>
-                        </select>
-                    </label>
-                    <label class="stcf-mini-field"><span>每回合影响属性</span>
-                        <select class="text_pole" data-field="targetStat">
-                            <option value="hp" ${st.targetStat === 'hp' ? 'selected' : ''}>生命值 HP</option>
-                            <option value="mp" ${st.targetStat === 'mp' ? 'selected' : ''}>体力/MP</option>
-                            <option value="gauge_a" ${st.targetStat === 'gauge_a' ? 'selected' : ''}>${escapeHtml(gAName)}</option>
-                            <option value="gauge_b" ${st.targetStat === 'gauge_b' ? 'selected' : ''}>${escapeHtml(gBName)}</option>
-                        </select>
-                    </label>
-                    <label class="stcf-mini-field"><span>每回合增减值</span><input type="number" class="text_pole" data-field="value" value="${st.value}"></label>
+                <label class="stcf-checkbox-row" style="margin-bottom:6px;">
+                    <input type="checkbox" data-field="skipTurn" ${st.skipTurn ? 'checked' : ''}>
+                    <span>💫 跳过行动回合（眩晕/控制效果，可与下方任意属性效果自由叠加）</span>
+                </label>
+                <div class="stcf-grid-4">
+                    <label class="stcf-mini-field"><span>每回合 HP</span><input type="number" class="text_pole" data-field="perTurnHp" value="${st.perTurnHp ?? 0}" title="负数扣血，正数回血"></label>
+                    <label class="stcf-mini-field"><span>每回合 MP</span><input type="number" class="text_pole" data-field="perTurnMp" value="${st.perTurnMp ?? 0}" title="负数耗蓝，正数回蓝"></label>
+                    <label class="stcf-mini-field"><span>每回合${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="perTurnGaugeA" value="${st.perTurnGaugeA ?? 0}"></label>
+                    <label class="stcf-mini-field"><span>每回合${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="perTurnGaugeB" value="${st.perTurnGaugeB ?? 0}"></label>
                 </div>
                 <div class="stcf-grid-3">
-                    <label class="stcf-mini-field"><span>攻击倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="atkMultiplier" value="${st.atkMultiplier}"></label>
+                    <label class="stcf-mini-field"><span>攻击倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="atkMultiplier" value="${st.atkMultiplier}" title="1不变，1.3为+30%，0.7为-30%"></label>
                     <label class="stcf-mini-field"><span>防御倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="defMultiplier" value="${st.defMultiplier}"></label>
                     <label class="stcf-mini-field"><span>持续回合数</span><input type="number" min="1" class="text_pole" data-field="duration" value="${st.duration}"></label>
+                </div>
+                <div class="stcf-field-row" style="margin-bottom:0;">
+                    <label>🔄 倒计时结束后自动转化为另一个状态：</label>
+                    <select class="text_pole" data-field="onExpireStatusId">${buildStatusSelectOptions(cfg, st.onExpireStatusId, '无（结束直接移除）')}</select>
                 </div>
             </div>
         `).join('');
@@ -850,8 +857,12 @@ export async function initSettingsUI(deps) {
         elLogHeader.value = cfg.general.logHeaderTemplate || '';
         elGaugeAName.value = cfg.gauges?.gauge_a?.name || '状态槽A';
         elGaugeAColor.value = cfg.gauges?.gauge_a?.color || '#e67e22';
+        elGaugeATick.value = String(cfg.gauges?.gauge_a?.perTurnChange ?? 0);
+        elGaugeAScope.value = cfg.gauges?.gauge_a?.perTurnScope || 'all';
         elGaugeBName.value = cfg.gauges?.gauge_b?.name || '状态槽B';
         elGaugeBColor.value = cfg.gauges?.gauge_b?.color || '#9b59b6';
+        elGaugeBTick.value = String(cfg.gauges?.gauge_b?.perTurnChange ?? 0);
+        elGaugeBScope.value = cfg.gauges?.gauge_b?.perTurnScope || 'all';
 
         renderUnitsList('ally', elAlliesEditor);
         renderUnitsList('enemy', elEnemiesEditor);
