@@ -227,6 +227,7 @@ export function normalizeConfig(rawConfig, defaults) {
     general.mvuSyncEnabled = general.mvuSyncEnabled !== false;
     general.mvuWriteBack = general.mvuWriteBack !== false;
     general.mvuInheritVitalsOnStart = general.mvuInheritVitalsOnStart !== false;
+    general.mvuSyncStatuses = general.mvuSyncStatuses !== false;
     general.syncPartyToAi = general.syncPartyToAi !== false;
     general.syncBattleToAi = general.syncBattleToAi !== false;
     general.syncCatalogToAi = general.syncCatalogToAi !== false;

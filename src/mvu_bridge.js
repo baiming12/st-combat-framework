@@ -12,7 +12,56 @@
  */
 
 import { clamp, deepClone, getSTContext } from './config.js';
-import { findEquipmentById, findItemById, findSkillById, syncUnitEquipmentEffects } from './engine.js';
+import { findEquipmentById, findItemById, findSkillById, findStatusDefById, syncUnitEquipmentEffects } from './engine.js';
+
+/**
+ * 将 MVU 里的 statuses 数组解析为合法的普通临时状态列表
+ * 兼容对象 { id, turns, source? } 与简写字符串 "debuff_01"
+ */
+function parseMvuNormalStatuses(rawStatuses, config) {
+    if (!Array.isArray(rawStatuses)) return [];
+    const result = [];
+    const seen = new Set();
+    for (const entry of rawStatuses) {
+        if (!entry) continue;
+        // 跳过由装备或阈值自动派生出的状态（避免重复，它们会由引擎自动重建）
+        if (typeof entry === 'object' && (entry.source === 'equipment' || entry.source === 'threshold')) {
+            continue;
+        }
+        const statusId = typeof entry === 'string' ? entry.trim() : String(entry.id || entry.statusId || '').trim();
+        if (!statusId || seen.has(statusId)) continue;
+        const def = findStatusDefById(config, statusId);
+        if (!def) continue;
+        const turnsRaw = typeof entry === 'object' ? (entry.turns ?? entry.remainingTurns ?? def.duration) : def.duration;
+        const remainingTurns = Math.max(1, Math.round(Number(turnsRaw) || def.duration));
+        seen.add(statusId);
+        result.push({
+            statusId: def.id,
+            remainingTurns,
+            source: 'normal',
+        });
+    }
+    return result;
+}
+
+/**
+ * 将单位当前全部活跃状态序列化为精简 MVU Zod 数组 [{ id, name, turns, source }]
+ */
+function serializeStatusesForMvu(statuses, config) {
+    if (!Array.isArray(statuses)) return [];
+    const out = [];
+    for (const st of statuses) {
+        const def = findStatusDefById(config, st.statusId);
+        if (!def) continue;
+        out.push({
+            id: def.id,
+            name: def.name,
+            turns: Math.max(1, Math.round(Number(st.remainingTurns) || def.duration)),
+            source: st.source || 'normal',
+        });
+    }
+    return out;
+}
 
 /**
  * 找到当前聊天中最新一条存在（或可挂载）变量的楼层索引及 swipe_id
@@ -274,6 +323,20 @@ export function pullFromMvuZod(config, battleState) {
                     const nextGB = clamp(Math.round(Number(mvuAlly.gauge_b)), 0, 100);
                     if (live.gauges.gauge_b !== nextGB) { live.gauges.gauge_b = nextGB; changed = true; }
                 }
+
+                // 同步 MVU 中的临时 Buff/Debuff（保留由装备/阈值派生的状态）
+                if (config.general?.mvuSyncStatuses !== false && Array.isArray(mvuAlly.statuses)) {
+                    const incomingNormal = parseMvuNormalStatuses(mvuAlly.statuses, config);
+                    const prevNormal = (live.statuses || []).filter(s => !s.source || s.source === 'normal');
+                    const prevSig = JSON.stringify(prevNormal.map(s => [s.statusId, s.remainingTurns]));
+                    const nextSig = JSON.stringify(incomingNormal.map(s => [s.statusId, s.remainingTurns]));
+                    if (prevSig !== nextSig) {
+                        const nonNormal = (live.statuses || []).filter(s => s.source === 'equipment' || s.source === 'threshold');
+                        live.statuses = [...nonNormal, ...incomingNormal];
+                        changed = true;
+                        notes.push(`${live.name}状态`);
+                    }
+                }
             }
         }
     }
@@ -356,6 +419,12 @@ export function applyMvuVitalsOnBattleStart(battleState, config) {
         if (Number.isFinite(Number(src.gauge_b))) {
             ally.gauges.gauge_b = clamp(Math.round(Number(src.gauge_b)), 0, 100);
         }
+        // 若日常剧情里通过 MVU 挂上了临时异常/增益状态，开战时自动带入战场
+        if (config.general?.mvuSyncStatuses !== false && Array.isArray(src.statuses)) {
+            const incomingNormal = parseMvuNormalStatuses(src.statuses, config);
+            const nonNormal = (ally.statuses || []).filter(s => s.source === 'equipment' || s.source === 'threshold');
+            ally.statuses = [...nonNormal, ...incomingNormal];
+        }
     }
 }
 
@@ -388,7 +457,7 @@ export async function pushToMvuZod(config, battleState, options = {}) {
         if (!nextAllies[tpl.id] && !tpl.enabled && !live) continue;
 
         const prevAlly = nextAllies[tpl.id] || {};
-        nextAllies[tpl.id] = {
+        const allyRecord = {
             ...prevAlly,
             hp: live ? live.hp : (Number.isFinite(Number(prevAlly.hp)) ? prevAlly.hp : tpl.maxHp),
             mp: live ? live.mp : (Number.isFinite(Number(prevAlly.mp)) ? prevAlly.mp : tpl.maxMp),
@@ -397,6 +466,12 @@ export async function pushToMvuZod(config, battleState, options = {}) {
             equipmentIds: [...(live ? (live.equipmentIds || []) : (tpl.equipmentIds || []))],
             skillIds: [...(live ? (live.skillIds || []) : (tpl.skillIds || []))],
         };
+        if (config.general?.mvuSyncStatuses !== false) {
+            allyRecord.statuses = live
+                ? serializeStatusesForMvu(live.statuses, config)
+                : (Array.isArray(prevAlly.statuses) ? prevAlly.statuses : []);
+        }
+        nextAllies[tpl.id] = allyRecord;
     }
 
     const nextItems = deepClone(prevCombat.items || {});

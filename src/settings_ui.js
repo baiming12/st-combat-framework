@@ -97,6 +97,7 @@ export async function initSettingsUI(deps) {
     const elMvuSync = container.querySelector('#stcf-set-mvu-sync');
     const elMvuWriteBack = container.querySelector('#stcf-set-mvu-writeback');
     const elMvuInherit = container.querySelector('#stcf-set-mvu-inherit');
+    const elMvuStatuses = container.querySelector('#stcf-set-mvu-statuses');
     const elListenAi = container.querySelector('#stcf-set-listen-ai');
     const elSyncParty = container.querySelector('#stcf-set-sync-party');
     const elSyncBattle = container.querySelector('#stcf-set-sync-battle');
@@ -129,6 +130,7 @@ export async function initSettingsUI(deps) {
     elMvuSync.addEventListener('change', () => { deps.getConfig().general.mvuSyncEnabled = elMvuSync.checked; commitChange(); });
     elMvuWriteBack.addEventListener('change', () => { deps.getConfig().general.mvuWriteBack = elMvuWriteBack.checked; commitChange(); });
     elMvuInherit.addEventListener('change', () => { deps.getConfig().general.mvuInheritVitalsOnStart = elMvuInherit.checked; commitChange(); });
+    elMvuStatuses.addEventListener('change', () => { deps.getConfig().general.mvuSyncStatuses = elMvuStatuses.checked; commitChange(); });
     elListenAi.addEventListener('change', () => { deps.getConfig().general.listenAiEvents = elListenAi.checked; commitChange(); });
     elSyncParty.addEventListener('change', () => { deps.getConfig().general.syncPartyToAi = elSyncParty.checked; commitChange(); });
     elSyncBattle.addEventListener('change', () => { deps.getConfig().general.syncBattleToAi = elSyncBattle.checked; commitChange(); });
@@ -922,6 +924,7 @@ export async function initSettingsUI(deps) {
         elMvuSync.checked = cfg.general.mvuSyncEnabled !== false;
         elMvuWriteBack.checked = cfg.general.mvuWriteBack !== false;
         elMvuInherit.checked = cfg.general.mvuInheritVitalsOnStart !== false;
+        elMvuStatuses.checked = cfg.general.mvuSyncStatuses !== false;
         elListenAi.checked = cfg.general.listenAiEvents !== false;
         elSyncParty.checked = cfg.general.syncPartyToAi !== false;
         elSyncBattle.checked = cfg.general.syncBattleToAi !== false;

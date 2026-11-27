@@ -337,6 +337,10 @@ export function buildAiContextSnapshot(battleState, config) {
             const txt = config.items.map(it => `${it.id}:${it.name}${it.description ? `(${it.description})` : ''}`).join('；');
             catLines.push(`- 道具库：${txt}`);
         }
+        if ((config.statuses || []).length > 0) {
+            const txt = config.statuses.map(st => `${st.id}:${st.name}${st.description ? `(${st.description})` : ''}`).join('；');
+            catLines.push(`- 状态/Buff库：${txt}`);
+        }
 
         if (catLines.length > 1) {
             blocks.push(catLines.join('\n'));

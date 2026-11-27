@@ -37,7 +37,7 @@
 
                     <label class="stcf-checkbox-row">
                         <input type="checkbox" id="stcf-set-mvu-sync">
-                        <span>🔗 启用 MVU Zod 双向联动（自动读写 <code>stat_data.combat</code>，统一数据源，不同步 Buff）</span>
+                        <span>🔗 启用 MVU Zod 双向联动（自动读写 <code>stat_data.combat</code>，统一数据源）</span>
                     </label>
 
                     <label class="stcf-checkbox-row">
@@ -47,7 +47,12 @@
 
                     <label class="stcf-checkbox-row">
                         <input type="checkbox" id="stcf-set-mvu-inherit">
-                        <span>🔗 开战时继承 MVU Zod 中的当前 HP / MP / 状态槽（把日常剧情受伤带入战斗）</span>
+                        <span>🔗 开战时继承 MVU Zod 中的当前 HP / MP / 状态槽 / 临时状态</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-mvu-statuses">
+                        <span>🔗 双向同步角色身上的 Buff / Debuff 状态（<code>combat.allies.*.statuses</code>）</span>
                     </label>
 
                     <label class="stcf-checkbox-row">
