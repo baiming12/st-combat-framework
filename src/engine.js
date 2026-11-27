@@ -1356,26 +1356,22 @@ function performSkill(state, config, actor, skill, targetId) {
         }
     }
 
-    // v1.6：支持同时向自身附加多个状态
+    // v1.6/v1.9：先计算主目标与附加复合效果，再挂载本技能的自身/群体新状态（避免复合净化误清刚上的新 Buff）
     const applyEntries = getApplyStatusEntries(skill);
-    for (const entry of applyEntries) {
-        if (entry.target === 'self') {
-            const stText = tryApplyStatus(actor, entry.statusId, entry.chance, config, actor);
-            if (stText) selfNotes.push(stText);
-        }
-    }
 
     const targetSummaries = [];
     const attackedTargetIds = [];
+    let mainTotalAmount = 0;
 
     for (const target of targets) {
         const vars = buildFormulaVars(actor, target, config);
         const amount = Math.max(0, evaluateFormula(skill.formula, vars));
+        mainTotalAmount += amount;
         const notes = [];
 
         if (skill.effectType === 'damage') {
             target.hp = Math.max(0, target.hp - amount);
-            attackedTargetIds.push(target.id);
+            if (target.side !== actor.side) attackedTargetIds.push(target.id);
             notes.push(`造成 ${amount} 点伤害（剩余 HP ${target.hp}/${target.maxHp}）`);
             if (target.hp <= 0) notes.push('倒下');
         } else if (skill.effectType === 'heal') {
@@ -1390,9 +1386,9 @@ function performSkill(state, config, actor, skill, targetId) {
 
         notes.push(...applyGaugeChanges(target, skill.targetGaugeChanges, skill.targetGaugeAChange, skill.targetGaugeBChange, config));
 
-        // v1.6：支持同时向目标附加多个状态（v1.7 传入施法者 actor 以支持打断施法者解除束缚）
+        // v1.6：支持同时向主目标附加多个状态（v1.7 传入施法者 actor 以支持打断施法者解除束缚）
         for (const entry of applyEntries) {
-            if (entry.target !== 'self') {
+            if (!entry.target || entry.target === 'target') {
                 const stText = tryApplyStatus(target, entry.statusId, entry.chance, config, actor);
                 if (stText) notes.push(stText);
             }
@@ -1401,7 +1397,72 @@ function performSkill(state, config, actor, skill, targetId) {
         targetSummaries.push(`对 ${target.name} ${notes.length ? notes.join('，') : '生效'}`);
     }
 
-    // 在主效果公式计算完成后再结算自身状态槽增减（支持“按当前层数结算伤害再消耗层数”的连击豆玩法）
+    // v1.9：执行技能的「附加复合效果」（同一技能可对敌人与自己/全队同时产生不同效果，支持公式变量 last_amount）
+    for (const ef of skill.extraEffects || []) {
+        if (!ef || typeof ef !== 'object') continue;
+        const efTargets = ef.targetType === 'same'
+            ? targets.filter(t => isAlive(t) || ef.effectType === 'utility')
+            : resolveTargets(state, actor, ef.targetType, targetId);
+
+        for (const et of efTargets) {
+            const efVars = { ...buildFormulaVars(actor, et, config), last_amount: mainTotalAmount };
+            const efAmount = Math.max(0, evaluateFormula(ef.formula, efVars));
+            const efNotes = [];
+
+            if (ef.effectType === 'damage') {
+                et.hp = Math.max(0, et.hp - efAmount);
+                if (et.side !== actor.side) attackedTargetIds.push(et.id);
+                efNotes.push(`造成 ${efAmount} 点伤害（剩余 HP ${et.hp}/${et.maxHp}）`);
+                if (et.hp <= 0) efNotes.push('倒下');
+            } else if (ef.effectType === 'heal') {
+                const before = et.hp;
+                et.hp = Math.min(et.maxHp, et.hp + efAmount);
+                efNotes.push(`回复 ${et.hp - before} 点 HP（当前 HP ${et.hp}/${et.maxHp}）`);
+            } else if (ef.effectType === 'mp_restore') {
+                const before = et.mp;
+                et.mp = Math.min(et.maxMp, et.mp + efAmount);
+                efNotes.push(`回复 ${et.mp - before} 点 MP（当前 ${et.mp}/${et.maxMp}）`);
+            } else if (ef.effectType === 'cleanse') {
+                const removed = [];
+                et.statuses = (et.statuses || []).filter(st => {
+                    if (st.source === 'equipment' || st.source === 'threshold') return true;
+                    const def = findStatusDefById(config, st.statusId);
+                    if (def) removed.push(def.name);
+                    return false;
+                });
+                efNotes.push(removed.length ? `清除了状态「${removed.join('、')}」` : '无可清除的临时状态');
+            }
+
+            efNotes.push(...applyGaugeChanges(et, ef.gaugeChanges, 0, 0, config));
+            if (efNotes.length > 0) {
+                if (et.id === actor.id && ef.targetType === 'self') {
+                    selfNotes.push(...efNotes);
+                } else {
+                    targetSummaries.push(`同时对 ${et.name} ${efNotes.join('，')}`);
+                }
+            }
+        }
+    }
+
+    // v1.6/v1.9：向自身、全体友方、全体敌方附加状态
+    for (const entry of applyEntries) {
+        if (entry.target === 'self') {
+            const stText = tryApplyStatus(actor, entry.statusId, entry.chance, config, actor);
+            if (stText) selfNotes.push(stText);
+        } else if (entry.target === 'all_allies' || entry.target === 'all_enemies') {
+            const groupTargets = resolveTargets(state, actor, entry.target, targetId);
+            const appliedNames = [];
+            for (const gt of groupTargets) {
+                const stText = tryApplyStatus(gt, entry.statusId, entry.chance, config, actor);
+                if (stText) appliedNames.push(`${gt.name}${stText}`);
+            }
+            if (appliedNames.length > 0) {
+                targetSummaries.push(`群体状态：${appliedNames.join('、')}`);
+            }
+        }
+    }
+
+    // 在主效果与复合效果公式计算完成后再结算自身状态槽增减（支持“按当前层数结算伤害再消耗层数”的连击豆玩法）
     selfNotes.push(...applyGaugeChanges(actor, skill.selfGaugeChanges, skill.selfGaugeAChange, skill.selfGaugeBChange, config));
 
     const mpNote = skill.mpCost > 0 ? `（消耗 ${skill.mpCost} MP）` : '';

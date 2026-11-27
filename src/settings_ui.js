@@ -223,6 +223,9 @@ export async function initSettingsUI(deps) {
         for (const sk of cfg.skills || []) {
             renameGaugeKeyInMap(sk.selfGaugeChanges, oldId, newId);
             renameGaugeKeyInMap(sk.targetGaugeChanges, oldId, newId);
+            for (const ef of sk.extraEffects || []) {
+                renameGaugeKeyInMap(ef?.gaugeChanges, oldId, newId);
+            }
         }
         for (const it of cfg.items || []) {
             renameGaugeKeyInMap(it.targetGaugeChanges, oldId, newId);
@@ -913,6 +916,9 @@ export async function initSettingsUI(deps) {
             selfGaugeBChange: 0,
             targetGaugeAChange: 0,
             targetGaugeBChange: 0,
+            selfGaugeChanges: {},
+            targetGaugeChanges: {},
+            extraEffects: [],
             applyStatuses: [],
             requiredTargetStatusIds: [],
             requiredSelfStatusIds: [],
@@ -945,17 +951,62 @@ export async function initSettingsUI(deps) {
             const cardKey = `sk:${sk.id}`;
             const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
             const applyList = Array.isArray(sk.applyStatuses) ? sk.applyStatuses : [];
+            const extraList = Array.isArray(sk.extraEffects) ? sk.extraEffects : [];
             const reqTgtCount = (sk.requiredTargetStatusIds || []).length;
             const reqSelfCount = (sk.requiredSelfStatusIds || []).length;
             const cdTag = (sk.cooldown || 0) > 0 ? ` · CD${sk.cooldown}` : '';
+            const extraTag = extraList.length > 0 ? ` · 🔀+${extraList.length}复合` : '';
+
+            const extraRowsHtml = extraList.map((ef, eIdx) => `
+                <div class="stcf-sub-card" data-extra-index="${eIdx}" style="padding:6px;border:1px solid rgba(255,255,255,0.12);border-radius:6px;margin-bottom:6px;">
+                    <div class="stcf-grid-3" style="margin-bottom:4px;">
+                        <label class="stcf-mini-field"><span>附加目标</span>
+                            <select class="text_pole" data-extra-field="targetType">
+                                <option value="self" ${ef.targetType === 'self' ? 'selected' : ''}>仅自身</option>
+                                <option value="same" ${ef.targetType === 'same' ? 'selected' : ''}>同主目标</option>
+                                <option value="single_enemy" ${ef.targetType === 'single_enemy' ? 'selected' : ''}>单体敌方</option>
+                                <option value="all_enemies" ${ef.targetType === 'all_enemies' ? 'selected' : ''}>全体敌方</option>
+                                <option value="single_ally" ${ef.targetType === 'single_ally' ? 'selected' : ''}>单体友方</option>
+                                <option value="all_allies" ${ef.targetType === 'all_allies' ? 'selected' : ''}>全体友方</option>
+                            </select>
+                        </label>
+                        <label class="stcf-mini-field"><span>附加效果</span>
+                            <select class="text_pole" data-extra-field="effectType">
+                                <option value="heal" ${ef.effectType === 'heal' ? 'selected' : ''}>回复 HP</option>
+                                <option value="mp_restore" ${ef.effectType === 'mp_restore' ? 'selected' : ''}>回复 MP</option>
+                                <option value="damage" ${ef.effectType === 'damage' ? 'selected' : ''}>造成伤害</option>
+                                <option value="cleanse" ${ef.effectType === 'cleanse' ? 'selected' : ''}>净化异常状态</option>
+                                <option value="utility" ${ef.effectType === 'utility' ? 'selected' : ''}>仅改状态槽</option>
+                            </select>
+                        </label>
+                        <div style="display:flex;align-items:flex-end;gap:4px;">
+                            <label class="stcf-mini-field stcf-grow"><span>公式(可用 last_amount)</span>
+                                <input type="text" class="text_pole" data-extra-field="formula" value="${escapeHtml(ef.formula || '0')}" placeholder="如 last_amount*0.4 或 20">
+                            </label>
+                            <button type="button" class="stcf-del-btn" data-extra-action="remove" title="删除此复合效果">✖</button>
+                        </div>
+                    </div>
+                    ${gaugeEntries.length > 0 ? `
+                        <div class="stcf-grid-4">
+                            ${gaugeEntries.map(g => `
+                                <label class="stcf-mini-field"><span>该目标${escapeHtml(g.name)}</span>
+                                    <input type="number" class="text_pole" data-extra-gauge="${escapeHtml(g.id)}" value="${ef.gaugeChanges?.[g.id] ?? 0}">
+                                </label>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
 
             const applyRowsHtml = applyList.map((ap, aIdx) => `
                 <div class="stcf-apply-row" data-apply-index="${aIdx}">
                     <select class="text_pole" data-apply-field="statusId">${buildStatusSelectOptions(cfg, ap.statusId, '选择状态...')}</select>
                     <input type="number" min="0" max="100" class="text_pole stcf-pct-input" data-apply-field="chance" value="${ap.chance ?? 100}" title="触发概率 %">
                     <select class="text_pole stcf-tgt-select" data-apply-field="target">
-                        <option value="target" ${ap.target !== 'self' ? 'selected' : ''}>给目标</option>
-                        <option value="self" ${ap.target === 'self' ? 'selected' : ''}>给自己</option>
+                        <option value="target" ${!ap.target || ap.target === 'target' ? 'selected' : ''}>给主目标</option>
+                        <option value="self" ${ap.target === 'self' ? 'selected' : ''}>仅给自己</option>
+                        <option value="all_allies" ${ap.target === 'all_allies' ? 'selected' : ''}>给全体友方</option>
+                        <option value="all_enemies" ${ap.target === 'all_enemies' ? 'selected' : ''}>给全体敌方</option>
                     </select>
                     <button type="button" class="stcf-del-btn" data-apply-action="remove" title="删除此附加状态">✖</button>
                 </div>
@@ -966,7 +1017,7 @@ export async function initSettingsUI(deps) {
                     <summary class="stcf-fold-summary">
                         <span class="stcf-fold-title">
                             ${POOL_LABELS[sk.poolType] || '🌐'} [${escapeHtml(sk.worldview || '通用')}] <strong>${escapeHtml(sk.name)}</strong>
-                            <small class="stcf-muted">${sk.mpCost}MP · ${TARGET_LABELS[sk.targetType] || ''}${cdTag}</small>
+                            <small class="stcf-muted">${sk.mpCost}MP · ${TARGET_LABELS[sk.targetType] || ''}${cdTag}${extraTag}</small>
                         </span>
                         <span class="stcf-fold-right">
                             <span class="stcf-id-tag">${escapeHtml(sk.id)}</span>
@@ -1031,6 +1082,16 @@ export async function initSettingsUI(deps) {
                             <label class="stcf-mini-field"><span>AI 仅在 HP ≤ (%) 释放</span><input type="number" min="1" max="100" class="text_pole" data-field="aiHpBelowPercent" value="${sk.aiHpBelowPercent ?? 100}"></label>
                         </div>
 
+                        <!-- 折叠子区：附加复合效果（额外目标与效果） -->
+                        <details class="stcf-sub-fold">
+                            <summary>🔀 附加复合效果（对其他目标或自身同时生效 · 已配 ${extraList.length} 项）</summary>
+                            <div class="stcf-sub-body">
+                                <div class="stcf-muted" style="margin-bottom:5px;">可让同一技能在打敌人的同时给自己回血/回蓝/净化，或给全队治疗/加槽；公式中可用 <code>last_amount</code> 代表主效果刚造成的数值。</div>
+                                <button type="button" class="menu_button stcf-sm-btn" data-extra-action="add" style="margin-bottom:6px;">➕ 添加附加复合效果</button>
+                                ${extraRowsHtml || '<div class="stcf-muted">暂无附加复合效果</div>'}
+                            </div>
+                        </details>
+
                         <!-- 折叠子区：附加多个状态 -->
                         <details class="stcf-sub-fold">
                             <summary>✨ 附加状态列表（支持同时附加多个 · 已配 ${applyList.length} 项）</summary>
@@ -1065,6 +1126,24 @@ export async function initSettingsUI(deps) {
             const row = e.target.closest('.stcf-apply-row');
             const ap = skill.applyStatuses[Number(row.dataset.applyIndex)];
             if (ap) { ap.chance = Math.max(0, Math.min(100, Number(e.target.value) || 0)); commitChange(); }
+            return;
+        }
+        if (e.target.dataset.extraField === 'formula') {
+            const row = e.target.closest('[data-extra-index]');
+            const ef = skill.extraEffects?.[Number(row?.dataset.extraIndex)];
+            if (ef) { ef.formula = e.target.value; commitChange(); }
+            return;
+        }
+        if (e.target.dataset.extraGauge) {
+            const row = e.target.closest('[data-extra-index]');
+            const ef = skill.extraEffects?.[Number(row?.dataset.extraIndex)];
+            if (ef) {
+                const gid = e.target.dataset.extraGauge;
+                const val = Number(e.target.value) || 0;
+                if (!ef.gaugeChanges || typeof ef.gaugeChanges !== 'object') ef.gaugeChanges = {};
+                if (val === 0) delete ef.gaugeChanges[gid]; else ef.gaugeChanges[gid] = val;
+                commitChange();
+            }
             return;
         }
         if (e.target.dataset.skillSelfGauge) {
@@ -1106,6 +1185,15 @@ export async function initSettingsUI(deps) {
             }
             return;
         }
+        if (e.target.dataset.extraField) {
+            const row = e.target.closest('[data-extra-index]');
+            const ef = skill.extraEffects?.[Number(row?.dataset.extraIndex)];
+            if (ef) {
+                ef[e.target.dataset.extraField] = e.target.value;
+                commitChange();
+            }
+            return;
+        }
         if (e.target.dataset.skillReqTarget) {
             const set = new Set(skill.requiredTargetStatusIds || []);
             if (e.target.checked) set.add(e.target.dataset.skillReqTarget);
@@ -1136,6 +1224,19 @@ export async function initSettingsUI(deps) {
         if (e.target.closest('[data-action="delete"]')) {
             e.preventDefault();
             deps.getConfig().skills.splice(idx, 1);
+            commitChange(true);
+        } else if (e.target.closest('[data-extra-action="add"]')) {
+            if (!Array.isArray(skill.extraEffects)) skill.extraEffects = [];
+            skill.extraEffects.push({
+                targetType: 'self',
+                effectType: 'heal',
+                formula: 'max(10, last_amount * 0.4)',
+                gaugeChanges: {},
+            });
+            commitChange(true);
+        } else if (e.target.closest('[data-extra-action="remove"]')) {
+            const row = e.target.closest('[data-extra-index]');
+            skill.extraEffects.splice(Number(row.dataset.extraIndex), 1);
             commitChange(true);
         } else if (e.target.closest('[data-apply-action="add"]')) {
             if (!Array.isArray(skill.applyStatuses)) skill.applyStatuses = [];

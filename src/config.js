@@ -224,9 +224,11 @@ function normalizeUnitTemplate(rawUnit, side, index) {
 }
 
 /**
- * 规范化技能/道具的“多附加状态列表”（100% 向下兼容旧版单字段 applyStatusId）
+ * 规范化技能/道具的“多附加状态列表”（100% 向下兼容旧版单字段 applyStatusId；v1.9 支持 4 种施加对象）
  */
 function normalizeApplyStatuses(rawList, legacyId, legacyChance = 100, legacyTarget = 'target') {
+    const validTargets = ['target', 'self', 'all_allies', 'all_enemies'];
+    const normTarget = (t) => (validTargets.includes(t) ? t : 'target');
     if (Array.isArray(rawList)) {
         return rawList
             .filter(x => x && (typeof x === 'string' || x.statusId))
@@ -237,7 +239,7 @@ function normalizeApplyStatuses(rawList, legacyId, legacyChance = 100, legacyTar
                 return {
                     statusId: String(x.statusId || '').trim(),
                     chance: clamp(x.chance ?? 100, 0, 100),
-                    target: x.target === 'self' ? 'self' : 'target',
+                    target: normTarget(x.target),
                 };
             })
             .filter(x => x.statusId);
@@ -247,8 +249,25 @@ function normalizeApplyStatuses(rawList, legacyId, legacyChance = 100, legacyTar
     return [{
         statusId: singleId,
         chance: clamp(legacyChance ?? 100, 0, 100),
-        target: legacyTarget === 'self' ? 'self' : 'target',
+        target: normTarget(legacyTarget),
     }];
+}
+
+/**
+ * 规范化技能的“附加复合效果列表”（v1.9 新增：同一技能可同时对敌人和自己/全队产生不同效果）
+ */
+function normalizeExtraEffects(rawList) {
+    if (!Array.isArray(rawList)) return [];
+    const validTargets = ['self', 'same', 'single_enemy', 'all_enemies', 'single_ally', 'all_allies'];
+    const validEffects = ['damage', 'heal', 'mp_restore', 'cleanse', 'utility'];
+    return rawList
+        .filter(x => x && typeof x === 'object')
+        .map(x => ({
+            targetType: validTargets.includes(x.targetType) ? x.targetType : 'self',
+            effectType: validEffects.includes(x.effectType) ? x.effectType : 'heal',
+            formula: String(x.formula ?? '0'),
+            gaugeChanges: normalizeGaugeDeltaMap(x.gaugeChanges, x.gaugeAChange, x.gaugeBChange),
+        }));
 }
 
 /**
@@ -296,6 +315,7 @@ export function normalizeSkill(sk, idx = 0) {
         targetGaugeBChange: Number.isFinite(Number(sk?.targetGaugeChanges?.gauge_b ?? sk?.targetGaugeBChange)) ? Number(sk?.targetGaugeChanges?.gauge_b ?? sk?.targetGaugeBChange) : 0,
         selfGaugeChanges: normalizeGaugeDeltaMap(sk?.selfGaugeChanges, sk?.selfGaugeAChange, sk?.selfGaugeBChange),
         targetGaugeChanges: normalizeGaugeDeltaMap(sk?.targetGaugeChanges, sk?.targetGaugeAChange, sk?.targetGaugeBChange),
+        extraEffects: normalizeExtraEffects(sk?.extraEffects),
         applyStatuses,
         requiredTargetStatusIds: normalizeIdList(sk?.requiredTargetStatusIds),
         requiredSelfStatusIds: normalizeIdList(sk?.requiredSelfStatusIds),
