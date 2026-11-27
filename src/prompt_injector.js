@@ -8,7 +8,7 @@
  *    - 极简世界观图鉴目录（所有技能/装备/道具/敌人的 [ID] 名称：简述，供 AI 按 ID 精准发技能、掉装备、塞敌人！）
  */
 
-import { EXTENSION_KEY, getSTContext } from './config.js';
+import { EXTENSION_KEY, getGaugeEntries, getSTContext } from './config.js';
 import {
     appendBattleLog,
     findClassById,
@@ -39,7 +39,7 @@ function compareValue(actual, operator, threshold) {
     }
 }
 
-function doesUnitMatchRule(unit, rule) {
+function doesUnitMatchRule(unit, rule, config) {
     if (!unit) return false;
     switch (rule.conditionType) {
         case 'hp': return compareValue(unit.hp, rule.operator, rule.threshold);
@@ -48,15 +48,20 @@ function doesUnitMatchRule(unit, rule) {
             return compareValue(pct, rule.operator, rule.threshold);
         }
         case 'mp': return compareValue(unit.mp, rule.operator, rule.threshold);
-        case 'gauge_a': return compareValue(unit.gauges?.gauge_a ?? 0, rule.operator, rule.threshold);
-        case 'gauge_b': return compareValue(unit.gauges?.gauge_b ?? 0, rule.operator, rule.threshold);
         case 'has_status':
             return Boolean(rule.statusId) && (unit.statuses || []).some(s => s.statusId === rule.statusId);
-        default: return false;
+        default: {
+            const gDef = config?.gauges?.[rule.conditionType];
+            if (gDef || rule.conditionType === 'gauge_a' || rule.conditionType === 'gauge_b') {
+                const val = unit.gauges?.[rule.conditionType] ?? (gDef?.min ?? 0);
+                return compareValue(val, rule.operator, rule.threshold);
+            }
+            return false;
+        }
     }
 }
 
-function evaluateRule(battleState, rule) {
+function evaluateRule(battleState, rule, config) {
     if (!battleState || !battleState.active || !rule.enabled) {
         return { matched: false, matchedUnits: [] };
     }
@@ -64,24 +69,24 @@ function evaluateRule(battleState, rule) {
     const enemies = battleState.enemies || [];
     switch (rule.scope) {
         case 'any_ally': {
-            const matchedUnits = allies.filter(u => doesUnitMatchRule(u, rule));
+            const matchedUnits = allies.filter(u => doesUnitMatchRule(u, rule, config));
             return { matched: matchedUnits.length > 0, matchedUnits };
         }
         case 'all_allies': {
-            const matched = allies.length > 0 && allies.every(u => doesUnitMatchRule(u, rule));
+            const matched = allies.length > 0 && allies.every(u => doesUnitMatchRule(u, rule, config));
             return { matched, matchedUnits: matched ? allies : [] };
         }
         case 'any_enemy': {
-            const matchedUnits = enemies.filter(u => doesUnitMatchRule(u, rule));
+            const matchedUnits = enemies.filter(u => doesUnitMatchRule(u, rule, config));
             return { matched: matchedUnits.length > 0, matchedUnits };
         }
         case 'all_enemies': {
-            const matched = enemies.length > 0 && enemies.every(u => doesUnitMatchRule(u, rule));
+            const matched = enemies.length > 0 && enemies.every(u => doesUnitMatchRule(u, rule, config));
             return { matched, matchedUnits: matched ? enemies : [] };
         }
         case 'specific_unit': {
             const unit = getAllUnits(battleState).find(u => u.id === rule.unitId);
-            const ok = unit ? doesUnitMatchRule(unit, rule) : false;
+            const ok = unit ? doesUnitMatchRule(unit, rule, config) : false;
             return { matched: ok, matchedUnits: ok ? [unit] : [] };
         }
         default:
@@ -105,6 +110,10 @@ function renderPromptTemplate(template, matchedUnits, battleState, config) {
         '{{gauge_b_name}}': config.gauges?.gauge_b?.name || 'gauge_b',
         '{{turn}}': String(battleState?.turn ?? 1),
     };
+    for (const gDef of getGaugeEntries(config)) {
+        replacements[`{{${gDef.id}}}`] = String(primary.gauges?.[gDef.id] ?? gDef.min);
+        replacements[`{{${gDef.id}_name}}`] = gDef.name;
+    }
 
     let text = String(template || '');
     for (const [token, value] of Object.entries(replacements)) {
@@ -174,7 +183,7 @@ function syncThresholdBuffs(battleState, config) {
         const statusDefs = grantIds.map(id => findStatusDefById(config, id)).filter(Boolean);
         if (statusDefs.length === 0) continue;
 
-        const { matched, matchedUnits } = evaluateRule(battleState, rule);
+        const { matched, matchedUnits } = evaluateRule(battleState, rule, config);
         if (!matched) continue;
 
         for (const unit of matchedUnits) {
@@ -198,10 +207,14 @@ function syncThresholdBuffs(battleState, config) {
                         }
                     }
                     let resetNote = '';
-                    if (rule.resetGaugeOnTrigger === 'gauge_a' || rule.resetGaugeOnTrigger === 'gauge_b') {
-                        unit.gauges[rule.resetGaugeOnTrigger] = 0;
-                        const gName = config.gauges?.[rule.resetGaugeOnTrigger]?.name || rule.resetGaugeOnTrigger;
-                        resetNote = `，并将「${gName}」重置为 0`;
+                    const resetGid = rule.resetGaugeOnTrigger;
+                    const resetGDef = resetGid ? config.gauges?.[resetGid] : null;
+                    if (resetGid && (resetGDef || resetGid === 'gauge_a' || resetGid === 'gauge_b')) {
+                        const resetVal = resetGDef?.min ?? 0;
+                        if (!unit.gauges || typeof unit.gauges !== 'object') unit.gauges = {};
+                        unit.gauges[resetGid] = resetVal;
+                        const gName = resetGDef?.name || resetGid;
+                        resetNote = `，并将「${gName}」重置为 ${resetVal}`;
                     } else {
                         nextEnteredSet.add(pairKey);
                     }
@@ -271,8 +284,7 @@ export function buildAiContextSnapshot(battleState, config) {
     if (!config?.general?.enabled) return '';
 
     const blocks = [];
-    const gAName = config.gauges?.gauge_a?.name || '状态槽A';
-    const gBName = config.gauges?.gauge_b?.name || '状态槽B';
+    const gaugeEntries = getGaugeEntries(config);
 
     // 块 1：我方当前出战角色档案（穿戴装备、已学技能、背包道具）
     if (config.general.syncPartyToAi) {
@@ -323,7 +335,8 @@ export function buildAiContextSnapshot(battleState, config) {
             }).filter(Boolean).join('、') || '无';
             const aliveTag = isAlive(u) ? '' : '[已倒下]';
             const desc = u.description ? `｜简介:${u.description}` : '';
-            return `- ${u.name}${aliveTag} HP:${u.hp}/${u.maxHp} MP:${u.mp}/${u.maxMp} 物攻:${eff.atk} 精神:${eff.spi} 物防:${eff.def} 法抗:${eff.mdef} ${gAName}:${u.gauges?.gauge_a ?? 0}/100 ${gBName}:${u.gauges?.gauge_b ?? 0}/100｜状态:${stText}${desc}`;
+            const gaugesStr = gaugeEntries.map(g => `${g.name}:${u.gauges?.[g.id] ?? g.min}/${g.max}`).join(' ');
+            return `- ${u.name}${aliveTag} HP:${u.hp}/${u.maxHp} MP:${u.mp}/${u.maxMp} 物攻:${eff.atk} 精神:${eff.spi} 物防:${eff.def} 法抗:${eff.mdef}${gaugesStr ? ` ${gaugesStr}` : ''}｜状态:${stText}${desc}`;
         };
 
         const battleLines = [
@@ -410,7 +423,7 @@ export function syncThresholdPrompts(battleState, config) {
         const ctx = getSTContext();
         for (const rule of config.triggerRules || []) {
             if (!rule.promptText?.trim()) continue;
-            const { matched, matchedUnits } = evaluateRule(battleState, rule);
+            const { matched, matchedUnits } = evaluateRule(battleState, rule, config);
             const promptKey = `${EXTENSION_KEY}_rule_${rule.id}`;
 
             if (matched) {

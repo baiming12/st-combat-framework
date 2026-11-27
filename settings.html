@@ -110,50 +110,12 @@
                 </div>
 
                 <div class="stcf-section-card">
-                    <div class="stcf-section-title">自定义特殊计量条（范围 0-100，支持每回合自动增减）</div>
-                    <div class="stcf-grid-2">
-                        <div class="stcf-field-row">
-                            <label for="stcf-set-gauge-a-name">状态槽 A 显示名称：</label>
-                            <input type="text" id="stcf-set-gauge-a-name" class="text_pole" placeholder="状态槽A">
-                        </div>
-                        <div class="stcf-field-row">
-                            <label for="stcf-set-gauge-a-color">状态槽 A 进度条颜色：</label>
-                            <input type="color" id="stcf-set-gauge-a-color" class="stcf-color-input">
-                        </div>
-                        <div class="stcf-field-row">
-                            <label for="stcf-set-gauge-a-tick">状态槽 A 每回合自动增减：</label>
-                            <input type="number" id="stcf-set-gauge-a-tick" class="text_pole" placeholder="0（正数增长，负数衰减）">
-                        </div>
-                        <div class="stcf-field-row">
-                            <label for="stcf-set-gauge-a-scope">状态槽 A 自动变化阵营：</label>
-                            <select id="stcf-set-gauge-a-scope" class="text_pole">
-                                <option value="all">敌我双方全员</option>
-                                <option value="allies">仅我方角色</option>
-                                <option value="enemies">仅敌方单位</option>
-                            </select>
-                        </div>
-
-                        <div class="stcf-field-row">
-                            <label for="stcf-set-gauge-b-name">状态槽 B 显示名称：</label>
-                            <input type="text" id="stcf-set-gauge-b-name" class="text_pole" placeholder="状态槽B">
-                        </div>
-                        <div class="stcf-field-row">
-                            <label for="stcf-set-gauge-b-color">状态槽 B 进度条颜色：</label>
-                            <input type="color" id="stcf-set-gauge-b-color" class="stcf-color-input">
-                        </div>
-                        <div class="stcf-field-row">
-                            <label for="stcf-set-gauge-b-tick">状态槽 B 每回合自动增减：</label>
-                            <input type="number" id="stcf-set-gauge-b-tick" class="text_pole" placeholder="0（正数增长，负数衰减）">
-                        </div>
-                        <div class="stcf-field-row">
-                            <label for="stcf-set-gauge-b-scope">状态槽 B 自动变化阵营：</label>
-                            <select id="stcf-set-gauge-b-scope" class="text_pole">
-                                <option value="all">敌我双方全员</option>
-                                <option value="allies">仅我方角色</option>
-                                <option value="enemies">仅敌方单位</option>
-                            </select>
-                        </div>
+                    <div class="stcf-section-header">
+                        <span class="stcf-section-title">自定义特殊状态槽（可自由增删，支持自定义范围与每回合增减）</span>
+                        <button type="button" id="stcf-btn-add-gauge" class="menu_button stcf-sm-btn">➕ 新增状态槽</button>
                     </div>
+                    <p class="stcf-help-text">除了默认的 <code>gauge_a</code> / <code>gauge_b</code>，你和写卡助手可以自由添加任意额外状态槽（如理智、连击豆、圣印、魔素等），公式/技能/Buff/阈值规则均自动识别。</p>
+                    <div id="stcf-gauges-editor" class="stcf-editor-list"></div>
                 </div>
 
                 <!-- 内置世界观扩展包一键载入 -->
@@ -268,7 +230,7 @@
                     <div class="stcf-tip-box">
                         <strong>公式可用变量：</strong>
                         物理 <code>atk</code> / <code>target_def</code>；法术 <code>spi</code>(精神) / <code>target_mdef</code>(法抗)；
-                        以及 <code>level</code>、<code>hp</code>、<code>max_hp</code>、<code>gauge_a</code>、<code>gauge_b</code>、<code>max(a,b)</code>、<code>min(a,b)</code>、<code>rand(min,max)</code>
+                        以及 <code>level</code>、<code>hp</code>、<code>max_hp</code>、任意状态槽 ID（如 <code>gauge_a</code>、<code>gauge_b</code>、<code>sanity</code>）与 <code>target_&lt;ID&gt;</code>、<code>max(a,b)</code>、<code>min(a,b)</code>、<code>rand(min,max)</code>
                     </div>
                     <div id="stcf-skills-editor" class="stcf-editor-list"></div>
                 </div>

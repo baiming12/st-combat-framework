@@ -8,7 +8,7 @@
  * 5. 战报仅支持“填入输入框（绝不自动发送）”或“复制到剪贴板”
  */
 
-import { saveConfig } from './config.js';
+import { getGaugeEntries, saveConfig } from './config.js';
 import { applyMvuVitalsOnBattleStart } from './mvu_bridge.js';
 import {
     addEnemyToBattle,
@@ -627,10 +627,20 @@ export async function initHudUI(deps) {
 
         const hpPct = unit.maxHp > 0 ? Math.round((unit.hp / unit.maxHp) * 100) : 0;
         const mpPct = unit.maxMp > 0 ? Math.round((unit.mp / unit.maxMp) * 100) : 0;
-        const gA = unit.gauges?.gauge_a ?? 0;
-        const gB = unit.gauges?.gauge_b ?? 0;
-        const gADef = config.gauges?.gauge_a || { name: '状态槽A', color: '#e67e22' };
-        const gBDef = config.gauges?.gauge_b || { name: '状态槽B', color: '#9b59b6' };
+        const gaugeEntries = getGaugeEntries(config);
+        const gaugesHtml = gaugeEntries.map(gDef => {
+            const val = Number.isFinite(Number(unit.gauges?.[gDef.id])) ? Number(unit.gauges[gDef.id]) : gDef.min;
+            const span = Math.max(1, gDef.max - gDef.min);
+            const pct = Math.min(100, Math.max(0, Math.round(((val - gDef.min) / span) * 100)));
+            const valText = (gDef.min === 0 && gDef.max === 100) ? String(val) : `${val}/${gDef.max}`;
+            return `
+                <div class="stcf-bar-row stcf-bar-mini">
+                    <span class="stcf-bar-label" title="${escapeHtml(gDef.name)} (${gDef.min}~${gDef.max})">${escapeHtml(gDef.name)}</span>
+                    <div class="stcf-bar-track"><div class="stcf-bar-fill" style="width:${pct}%;background:${escapeHtml(gDef.color)}"></div></div>
+                    <span class="stcf-bar-val">${valText}</span>
+                </div>
+            `;
+        }).join('');
 
         const unitRestrained = isUnitRestrained(unit, config);
         let stateTag = '';
@@ -686,17 +696,21 @@ export async function initHudUI(deps) {
             ? `<span class="stcf-unit-tag stcf-tag-lv">Lv.${unit.level || 1}${clsObj ? ` ${escapeHtml(clsObj.name)}` : ''}</span>`
             : '';
 
+        const gmGaugeBtns = gaugeEntries.map(gDef => {
+            const step = (gDef.max - gDef.min) <= 15 ? 1 : 10;
+            return `
+                <span title="${escapeHtml(gDef.id)}">${escapeHtml(gDef.name)}</span>
+                <button type="button" class="stcf-gm-btn" data-gm-unit="${escapeHtml(unit.id)}" data-gm-stat="${escapeHtml(gDef.id)}" data-gm-delta="${-step}">-${step}</button>
+                <button type="button" class="stcf-gm-btn" data-gm-unit="${escapeHtml(unit.id)}" data-gm-stat="${escapeHtml(gDef.id)}" data-gm-delta="${step}">+${step}</button>
+            `;
+        }).join('');
+
         const gmHtml = gmMode ? `
             <div class="stcf-gm-row">
                 <span>HP</span>
                 <button type="button" class="stcf-gm-btn" data-gm-unit="${escapeHtml(unit.id)}" data-gm-stat="hp" data-gm-delta="-10">-10</button>
                 <button type="button" class="stcf-gm-btn" data-gm-unit="${escapeHtml(unit.id)}" data-gm-stat="hp" data-gm-delta="10">+10</button>
-                <span>A槽</span>
-                <button type="button" class="stcf-gm-btn" data-gm-unit="${escapeHtml(unit.id)}" data-gm-stat="gauge_a" data-gm-delta="-10">-10</button>
-                <button type="button" class="stcf-gm-btn" data-gm-unit="${escapeHtml(unit.id)}" data-gm-stat="gauge_a" data-gm-delta="10">+10</button>
-                <span>B槽</span>
-                <button type="button" class="stcf-gm-btn" data-gm-unit="${escapeHtml(unit.id)}" data-gm-stat="gauge_b" data-gm-delta="-10">-10</button>
-                <button type="button" class="stcf-gm-btn" data-gm-unit="${escapeHtml(unit.id)}" data-gm-stat="gauge_b" data-gm-delta="10">+10</button>
+                ${gmGaugeBtns}
             </div>
         ` : '';
 
@@ -735,18 +749,7 @@ export async function initHudUI(deps) {
                         <div class="stcf-bar-track"><div class="stcf-bar-fill stcf-bar-mp" style="width:${mpPct}%"></div></div>
                         <span class="stcf-bar-val">${unit.mp}/${unit.maxMp}</span>
                     </div>
-                    <div class="stcf-gauges-row">
-                        <div class="stcf-bar-row stcf-bar-mini">
-                            <span class="stcf-bar-label" title="${escapeHtml(gADef.name)}">${escapeHtml(gADef.name)}</span>
-                            <div class="stcf-bar-track"><div class="stcf-bar-fill" style="width:${gA}%;background:${escapeHtml(gADef.color)}"></div></div>
-                            <span class="stcf-bar-val">${gA}</span>
-                        </div>
-                        <div class="stcf-bar-row stcf-bar-mini">
-                            <span class="stcf-bar-label" title="${escapeHtml(gBDef.name)}">${escapeHtml(gBDef.name)}</span>
-                            <div class="stcf-bar-track"><div class="stcf-bar-fill" style="width:${gB}%;background:${escapeHtml(gBDef.color)}"></div></div>
-                            <span class="stcf-bar-val">${gB}</span>
-                        </div>
-                    </div>
+                    ${gaugesHtml ? `<div class="stcf-gauges-row">${gaugesHtml}</div>` : ''}
                 </div>
 
                 ${statusHtml ? `<div class="stcf-statuses-row">${statusHtml}</div>` : ''}

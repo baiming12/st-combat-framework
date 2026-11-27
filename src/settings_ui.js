@@ -15,10 +15,12 @@ import {
     MAX_UNITS_PER_SIDE,
     exportConfigAsJson,
     getCurrentProfileInfo,
+    getGaugeEntries,
     importConfigFromJsonText,
     loadBuiltinPresetPack,
     loadConfig,
     resetConfigToDefaults,
+    sanitizeGaugeId,
     saveAsGlobalTemplate,
     saveConfig,
 } from './config.js';
@@ -101,6 +103,7 @@ export async function initSettingsUI(deps) {
 
     // 为所有编辑列表头部自动注入「全部展开 / 全部折叠」快捷小按钮
     const editorHostIds = [
+        'stcf-gauges-editor',
         'stcf-classes-editor',
         'stcf-allies-editor',
         'stcf-enemies-editor',
@@ -167,14 +170,7 @@ export async function initSettingsUI(deps) {
     const elOutputMode = container.querySelector('#stcf-set-output-mode');
     const elFillStrategy = container.querySelector('#stcf-set-fill-strategy');
     const elLogHeader = container.querySelector('#stcf-set-log-header');
-    const elGaugeAName = container.querySelector('#stcf-set-gauge-a-name');
-    const elGaugeAColor = container.querySelector('#stcf-set-gauge-a-color');
-    const elGaugeATick = container.querySelector('#stcf-set-gauge-a-tick');
-    const elGaugeAScope = container.querySelector('#stcf-set-gauge-a-scope');
-    const elGaugeBName = container.querySelector('#stcf-set-gauge-b-name');
-    const elGaugeBColor = container.querySelector('#stcf-set-gauge-b-color');
-    const elGaugeBTick = container.querySelector('#stcf-set-gauge-b-tick');
-    const elGaugeBScope = container.querySelector('#stcf-set-gauge-b-scope');
+    const elGaugesEditor = container.querySelector('#stcf-gauges-editor');
     const elPasteJson = container.querySelector('#stcf-paste-json');
 
     elEnabled.addEventListener('change', () => { deps.getConfig().general.enabled = elEnabled.checked; commitChange(); });
@@ -200,14 +196,178 @@ export async function initSettingsUI(deps) {
     elOutputMode.addEventListener('change', () => { deps.getConfig().general.outputMode = elOutputMode.value; commitChange(); });
     elFillStrategy.addEventListener('change', () => { deps.getConfig().general.inputFillStrategy = elFillStrategy.value; commitChange(); });
     elLogHeader.addEventListener('input', () => { deps.getConfig().general.logHeaderTemplate = elLogHeader.value; commitChange(); });
-    elGaugeAName.addEventListener('input', () => { deps.getConfig().gauges.gauge_a.name = elGaugeAName.value || '状态槽A'; commitChange(); });
-    elGaugeAColor.addEventListener('input', () => { deps.getConfig().gauges.gauge_a.color = elGaugeAColor.value; commitChange(); });
-    elGaugeATick.addEventListener('input', () => { deps.getConfig().gauges.gauge_a.perTurnChange = Math.round(Number(elGaugeATick.value) || 0); commitChange(); });
-    elGaugeAScope.addEventListener('change', () => { deps.getConfig().gauges.gauge_a.perTurnScope = elGaugeAScope.value; commitChange(); });
-    elGaugeBName.addEventListener('input', () => { deps.getConfig().gauges.gauge_b.name = elGaugeBName.value || '状态槽B'; commitChange(); });
-    elGaugeBColor.addEventListener('input', () => { deps.getConfig().gauges.gauge_b.color = elGaugeBColor.value; commitChange(); });
-    elGaugeBTick.addEventListener('input', () => { deps.getConfig().gauges.gauge_b.perTurnChange = Math.round(Number(elGaugeBTick.value) || 0); commitChange(); });
-    elGaugeBScope.addEventListener('change', () => { deps.getConfig().gauges.gauge_b.perTurnScope = elGaugeBScope.value; commitChange(); });
+
+    // =========================================================================
+    // 一点二、动态自定义特殊状态槽编辑器（v1.8：不限数量，支持自定义范围与增删）
+    // =========================================================================
+    const GAUGE_PALETTE = ['#e67e22', '#9b59b6', '#1abc9c', '#3498db', '#e74c3c', '#f1c40f', '#ec4899'];
+
+    function renameGaugeKeyInMap(map, oldId, newId) {
+        if (!map || typeof map !== 'object' || !Object.prototype.hasOwnProperty.call(map, oldId)) return;
+        map[newId] = map[oldId];
+        delete map[oldId];
+    }
+
+    function renameGaugeAcrossConfig(cfg, oldId, newId) {
+        if (!oldId || !newId || oldId === newId) return false;
+        if (cfg.gauges?.[newId]) return false;
+        const nextGauges = {};
+        for (const [k, v] of Object.entries(cfg.gauges || {})) {
+            if (k === oldId) nextGauges[newId] = { ...v, id: newId };
+            else nextGauges[k] = v;
+        }
+        cfg.gauges = nextGauges;
+        for (const u of [...(cfg.allies || []), ...(cfg.enemies || [])]) {
+            renameGaugeKeyInMap(u.initialGauges, oldId, newId);
+        }
+        for (const sk of cfg.skills || []) {
+            renameGaugeKeyInMap(sk.selfGaugeChanges, oldId, newId);
+            renameGaugeKeyInMap(sk.targetGaugeChanges, oldId, newId);
+        }
+        for (const it of cfg.items || []) {
+            renameGaugeKeyInMap(it.targetGaugeChanges, oldId, newId);
+        }
+        for (const st of cfg.statuses || []) {
+            renameGaugeKeyInMap(st.perTurnGauges, oldId, newId);
+        }
+        for (const r of cfg.triggerRules || []) {
+            if (r.conditionType === oldId) r.conditionType = newId;
+            if (r.resetGaugeOnTrigger === oldId) r.resetGaugeOnTrigger = newId;
+        }
+        return true;
+    }
+
+    container.querySelector('#stcf-btn-add-gauge')?.addEventListener('click', () => {
+        const cfg = deps.getConfig();
+        if (!cfg.gauges || typeof cfg.gauges !== 'object') cfg.gauges = {};
+        const existingKeys = Object.keys(cfg.gauges);
+        let idx = existingKeys.length + 1;
+        let newId = `gauge_${idx}`;
+        while (cfg.gauges[newId]) newId = `gauge_${++idx}`;
+        cfg.gauges[newId] = {
+            id: newId,
+            name: `自定义槽${idx}`,
+            color: GAUGE_PALETTE[existingKeys.length % GAUGE_PALETTE.length],
+            min: 0,
+            max: 100,
+            perTurnChange: 0,
+            perTurnScope: 'all',
+        };
+        commitChange(true, `gg:${newId}`);
+    });
+
+    function renderGaugesList(preserveOpen) {
+        if (!elGaugesEditor) return;
+        const cfg = deps.getConfig();
+        const openSet = preserveOpen ? captureOpenCardKeys(elGaugesEditor) : new Set();
+        const entries = getGaugeEntries(cfg);
+
+        if (entries.length === 0) {
+            elGaugesEditor.innerHTML = '<div class="stcf-muted">当前无特殊状态槽，可点击右上角「➕ 新增状态槽」添加。</div>';
+            return;
+        }
+
+        elGaugesEditor.innerHTML = entries.map(g => {
+            const cardKey = `gg:${g.id}`;
+            const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
+            const tickBadge = g.perTurnChange ? ` · 每回合${g.perTurnChange > 0 ? '+' : ''}${g.perTurnChange}` : '';
+            return `
+                <details class="stcf-item-card stcf-fold" data-gauge-id="${escapeHtml(g.id)}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
+                    <summary class="stcf-fold-summary">
+                        <span class="stcf-fold-title">
+                            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${escapeHtml(g.color)};margin-right:4px;"></span>
+                            <strong>${escapeHtml(g.name)}</strong>
+                            <small class="stcf-muted">(${g.min}~${g.max}${tickBadge})</small>
+                        </span>
+                        <span class="stcf-fold-right">
+                            <span class="stcf-id-tag">${escapeHtml(g.id)}</span>
+                            <button type="button" class="stcf-del-btn" data-gauge-action="delete" title="删除此状态槽">🗑️</button>
+                        </span>
+                    </summary>
+                    <div class="stcf-fold-body">
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>槽位 ID（公式变量名）</span><input type="text" class="text_pole" data-gauge-field="id" value="${escapeHtml(g.id)}" placeholder="如 sanity / holy"></label>
+                            <label class="stcf-mini-field"><span>显示名称</span><input type="text" class="text_pole" data-gauge-field="name" value="${escapeHtml(g.name)}" placeholder="如 理智值"></label>
+                            <label class="stcf-mini-field"><span>进度条颜色</span><input type="color" class="stcf-color-input" data-gauge-field="color" value="${escapeHtml(g.color)}"></label>
+                        </div>
+                        <div class="stcf-grid-4">
+                            <label class="stcf-mini-field"><span>最小值 min</span><input type="number" class="text_pole" data-gauge-field="min" value="${g.min}"></label>
+                            <label class="stcf-mini-field"><span>最大值 max</span><input type="number" class="text_pole" data-gauge-field="max" value="${g.max}"></label>
+                            <label class="stcf-mini-field"><span>每回合增减</span><input type="number" class="text_pole" data-gauge-field="perTurnChange" value="${g.perTurnChange}"></label>
+                            <label class="stcf-mini-field"><span>自动变化阵营</span>
+                                <select class="text_pole" data-gauge-field="perTurnScope">
+                                    <option value="all" ${g.perTurnScope === 'all' ? 'selected' : ''}>敌我全员</option>
+                                    <option value="allies" ${g.perTurnScope === 'allies' ? 'selected' : ''}>仅我方</option>
+                                    <option value="enemies" ${g.perTurnScope === 'enemies' ? 'selected' : ''}>仅敌方</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                </details>
+            `;
+        }).join('');
+    }
+
+    elGaugesEditor?.addEventListener('input', (e) => {
+        const card = e.target.closest('.stcf-item-card');
+        const field = e.target.dataset.gaugeField;
+        if (!card || !field || field === 'id') return;
+        const cfg = deps.getConfig();
+        const gid = card.dataset.gaugeId;
+        const gObj = cfg.gauges?.[gid];
+        if (!gObj) return;
+        if (field === 'min' || field === 'max' || field === 'perTurnChange') {
+            gObj[field] = Math.round(Number(e.target.value) || 0);
+            if (gObj.max <= gObj.min) gObj.max = gObj.min + 1;
+        } else {
+            gObj[field] = e.target.value || (field === 'name' ? gid : '#3498db');
+        }
+        commitChange();
+    });
+
+    elGaugesEditor?.addEventListener('change', (e) => {
+        const card = e.target.closest('.stcf-item-card');
+        const field = e.target.dataset.gaugeField;
+        if (!card || !field) return;
+        const cfg = deps.getConfig();
+        const gid = card.dataset.gaugeId;
+        const gObj = cfg.gauges?.[gid];
+        if (!gObj) return;
+        if (field === 'id') {
+            const nextId = sanitizeGaugeId(e.target.value, gid);
+            if (nextId !== gid) {
+                if (cfg.gauges[nextId]) {
+                    window.alert(`状态槽 ID「${nextId}」已存在，请换一个英文 ID。`);
+                    e.target.value = gid;
+                    return;
+                }
+                renameGaugeAcrossConfig(cfg, gid, nextId);
+                commitChange(true, `gg:${nextId}`);
+                return;
+            }
+            e.target.value = gid;
+            return;
+        }
+        if (field === 'perTurnScope') {
+            gObj.perTurnScope = e.target.value;
+            commitChange();
+        } else if (field === 'name' || field === 'min' || field === 'max' || field === 'color') {
+            commitChange(true);
+        }
+    });
+
+    elGaugesEditor?.addEventListener('click', (e) => {
+        const delBtn = e.target.closest('[data-gauge-action="delete"]');
+        if (!delBtn) return;
+        e.preventDefault();
+        const card = delBtn.closest('.stcf-item-card');
+        const gid = card?.dataset.gaugeId;
+        const cfg = deps.getConfig();
+        if (!gid || !cfg.gauges?.[gid]) return;
+        if (!window.confirm(`确定要删除状态槽「${cfg.gauges[gid].name} (${gid})」吗？`)) return;
+        delete cfg.gauges[gid];
+        commitChange(true);
+    });
 
     // 内置西幻扩展包一键载入
     async function handleLoadWesternFantasy(mode) {
@@ -550,13 +710,16 @@ export async function initSettingsUI(deps) {
         const cfg = deps.getConfig();
         const list = side === 'ally' ? cfg.allies : cfg.enemies;
         const openSet = preserveOpen ? captureOpenCardKeys(hostEl) : new Set();
-        const gAName = cfg.gauges?.gauge_a?.name || '状态槽A';
-        const gBName = cfg.gauges?.gauge_b?.name || '状态槽B';
+        const gaugeEntries = getGaugeEntries(cfg);
 
         hostEl.innerHTML = list.map((u, idx) => {
             const cardKey = `${side}:${u.id}`;
             const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
             const clsName = (cfg.classTrees || []).find(c => c.id === u.classId)?.name || '';
+            const initGaugesHtml = gaugeEntries.map(g => {
+                const initVal = u.initialGauges?.[g.id] ?? (g.id === 'gauge_a' ? u.initialGaugeA : (g.id === 'gauge_b' ? u.initialGaugeB : g.min));
+                return `<label class="stcf-mini-field"><span>初始${escapeHtml(g.name)}</span><input type="number" min="${g.min}" max="${g.max}" class="text_pole" data-unit-init-gauge="${escapeHtml(g.id)}" value="${initVal ?? g.min}"></label>`;
+            }).join('');
             const poolLabelMap = { universal: '🌐', class: '🎓', monster: '👹' };
             const skillListForSide = side === 'ally'
                 ? (cfg.skills || []).filter(sk => sk.poolType !== 'monster')
@@ -617,8 +780,7 @@ export async function initSettingsUI(deps) {
                             <label class="stcf-mini-field"><span>精神法攻 SPI</span><input type="number" min="0" class="text_pole" data-field="spi" value="${u.spi ?? 15}"></label>
                             <label class="stcf-mini-field"><span>物理防御 DEF</span><input type="number" min="0" class="text_pole" data-field="def" value="${u.def}"></label>
                             <label class="stcf-mini-field"><span>法术抗性 MDEF</span><input type="number" min="0" class="text_pole" data-field="mdef" value="${u.mdef ?? 5}"></label>
-                            <label class="stcf-mini-field"><span>初始${escapeHtml(gAName)}</span><input type="number" min="0" max="100" class="text_pole" data-field="initialGaugeA" value="${u.initialGaugeA}"></label>
-                            <label class="stcf-mini-field"><span>初始${escapeHtml(gBName)}</span><input type="number" min="0" max="100" class="text_pole" data-field="initialGaugeB" value="${u.initialGaugeB}"></label>
+                            ${initGaugesHtml}
                         </div>
                         <div class="stcf-grid-2">
                             <label class="stcf-mini-field"><span>AI 出招策略</span>
@@ -652,11 +814,22 @@ export async function initSettingsUI(deps) {
     function bindUnitsEvents(hostEl) {
         hostEl.addEventListener('input', (e) => {
             const card = e.target.closest('.stcf-item-card');
-            if (!card || !e.target.dataset.field || e.target.type === 'checkbox') return;
+            if (!card) return;
             const cfg = deps.getConfig();
             const list = card.dataset.side === 'ally' ? cfg.allies : cfg.enemies;
             const unit = list[Number(card.dataset.index)];
             if (!unit) return;
+            if (e.target.dataset.unitInitGauge) {
+                const gid = e.target.dataset.unitInitGauge;
+                const val = Math.round(Number(e.target.value) || 0);
+                if (!unit.initialGauges || typeof unit.initialGauges !== 'object') unit.initialGauges = {};
+                unit.initialGauges[gid] = val;
+                if (gid === 'gauge_a') unit.initialGaugeA = val;
+                if (gid === 'gauge_b') unit.initialGaugeB = val;
+                commitChange();
+                return;
+            }
+            if (!e.target.dataset.field || e.target.type === 'checkbox') return;
             unit[e.target.dataset.field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
             commitChange();
         });
@@ -749,8 +922,7 @@ export async function initSettingsUI(deps) {
     function renderSkillsList(preserveOpen) {
         const cfg = deps.getConfig();
         const openSet = preserveOpen ? captureOpenCardKeys(elSkillsEditor) : new Set();
-        const gAName = cfg.gauges?.gauge_a?.name || '状态槽A';
-        const gBName = cfg.gauges?.gauge_b?.name || '状态槽B';
+        const gaugeEntries = getGaugeEntries(cfg);
 
         const allWvs = collectAllWorldviews(cfg);
         elFilterSkillWv.innerHTML = [
@@ -842,10 +1014,14 @@ export async function initSettingsUI(deps) {
                             <label class="stcf-mini-field"><span>自身 HP 变化公式(负卖血/正吸血)</span><input type="text" class="text_pole" data-field="selfHpFormula" value="${escapeHtml(sk.selfHpFormula || '0')}" placeholder="0 / -20 / spi*0.5"></label>
                         </div>
                         <div class="stcf-grid-4">
-                            <label class="stcf-mini-field"><span>自身${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="selfGaugeAChange" value="${sk.selfGaugeAChange}"></label>
-                            <label class="stcf-mini-field"><span>自身${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="selfGaugeBChange" value="${sk.selfGaugeBChange}"></label>
-                            <label class="stcf-mini-field"><span>目标${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="targetGaugeAChange" value="${sk.targetGaugeAChange}"></label>
-                            <label class="stcf-mini-field"><span>目标${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="targetGaugeBChange" value="${sk.targetGaugeBChange}"></label>
+                            ${gaugeEntries.map(g => {
+                                const sv = sk.selfGaugeChanges?.[g.id] ?? (g.id === 'gauge_a' ? sk.selfGaugeAChange : (g.id === 'gauge_b' ? sk.selfGaugeBChange : 0));
+                                return `<label class="stcf-mini-field"><span>自身${escapeHtml(g.name)}</span><input type="number" class="text_pole" data-skill-self-gauge="${escapeHtml(g.id)}" value="${sv ?? 0}"></label>`;
+                            }).join('')}
+                            ${gaugeEntries.map(g => {
+                                const tv = sk.targetGaugeChanges?.[g.id] ?? (g.id === 'gauge_a' ? sk.targetGaugeAChange : (g.id === 'gauge_b' ? sk.targetGaugeBChange : 0));
+                                return `<label class="stcf-mini-field"><span>目标${escapeHtml(g.name)}</span><input type="number" class="text_pole" data-skill-target-gauge="${escapeHtml(g.id)}" value="${tv ?? 0}"></label>`;
+                            }).join('')}
                         </div>
                         <div class="stcf-grid-2">
                             <label class="stcf-mini-field"><span>AI 优先级（越大越优先）</span><input type="number" min="1" class="text_pole" data-field="aiPriority" value="${sk.aiPriority ?? 10}"></label>
@@ -886,6 +1062,26 @@ export async function initSettingsUI(deps) {
             const row = e.target.closest('.stcf-apply-row');
             const ap = skill.applyStatuses[Number(row.dataset.applyIndex)];
             if (ap) { ap.chance = Math.max(0, Math.min(100, Number(e.target.value) || 0)); commitChange(); }
+            return;
+        }
+        if (e.target.dataset.skillSelfGauge) {
+            const gid = e.target.dataset.skillSelfGauge;
+            const val = Number(e.target.value) || 0;
+            if (!skill.selfGaugeChanges || typeof skill.selfGaugeChanges !== 'object') skill.selfGaugeChanges = {};
+            if (val === 0) delete skill.selfGaugeChanges[gid]; else skill.selfGaugeChanges[gid] = val;
+            if (gid === 'gauge_a') skill.selfGaugeAChange = val;
+            if (gid === 'gauge_b') skill.selfGaugeBChange = val;
+            commitChange();
+            return;
+        }
+        if (e.target.dataset.skillTargetGauge) {
+            const gid = e.target.dataset.skillTargetGauge;
+            const val = Number(e.target.value) || 0;
+            if (!skill.targetGaugeChanges || typeof skill.targetGaugeChanges !== 'object') skill.targetGaugeChanges = {};
+            if (val === 0) delete skill.targetGaugeChanges[gid]; else skill.targetGaugeChanges[gid] = val;
+            if (gid === 'gauge_a') skill.targetGaugeAChange = val;
+            if (gid === 'gauge_b') skill.targetGaugeBChange = val;
+            commitChange();
             return;
         }
         if (!e.target.dataset.field || e.target.type === 'checkbox') return;
@@ -1085,8 +1281,7 @@ export async function initSettingsUI(deps) {
     function renderItemsList(preserveOpen) {
         const cfg = deps.getConfig();
         const openSet = preserveOpen ? captureOpenCardKeys(elItemsEditor) : new Set();
-        const gAName = cfg.gauges?.gauge_a?.name || '状态槽A';
-        const gBName = cfg.gauges?.gauge_b?.name || '状态槽B';
+        const gaugeEntries = getGaugeEntries(cfg);
 
         elItemsEditor.innerHTML = (cfg.items || []).map((it, idx) => {
             const cardKey = `it:${it.id}`;
@@ -1143,8 +1338,10 @@ export async function initSettingsUI(deps) {
                         </div>
                         <div class="stcf-grid-3">
                             <label class="stcf-mini-field"><span>数值公式</span><input type="text" class="text_pole" data-field="formula" value="${escapeHtml(it.formula)}"></label>
-                            <label class="stcf-mini-field"><span>目标${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="targetGaugeAChange" value="${it.targetGaugeAChange}"></label>
-                            <label class="stcf-mini-field"><span>目标${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="targetGaugeBChange" value="${it.targetGaugeBChange}"></label>
+                            ${gaugeEntries.map(g => {
+                                const tv = it.targetGaugeChanges?.[g.id] ?? (g.id === 'gauge_a' ? it.targetGaugeAChange : (g.id === 'gauge_b' ? it.targetGaugeBChange : 0));
+                                return `<label class="stcf-mini-field"><span>目标${escapeHtml(g.name)}</span><input type="number" class="text_pole" data-item-target-gauge="${escapeHtml(g.id)}" value="${tv ?? 0}"></label>`;
+                            }).join('')}
                         </div>
                         <label class="stcf-checkbox-row">
                             <input type="checkbox" data-field="consumesTurn" ${it.consumesTurn !== false ? 'checked' : ''}>
@@ -1172,6 +1369,14 @@ export async function initSettingsUI(deps) {
             const row = e.target.closest('.stcf-apply-row');
             const ap = item.applyStatuses[Number(row.dataset.applyIndex)];
             if (ap) { ap.chance = Math.max(0, Math.min(100, Number(e.target.value) || 0)); commitChange(); }
+        } else if (e.target.dataset.itemTargetGauge) {
+            const gid = e.target.dataset.itemTargetGauge;
+            const val = Number(e.target.value) || 0;
+            if (!item.targetGaugeChanges || typeof item.targetGaugeChanges !== 'object') item.targetGaugeChanges = {};
+            if (val === 0) delete item.targetGaugeChanges[gid]; else item.targetGaugeChanges[gid] = val;
+            if (gid === 'gauge_a') item.targetGaugeAChange = val;
+            if (gid === 'gauge_b') item.targetGaugeBChange = val;
+            commitChange();
         }
     });
     elItemsEditor.addEventListener('change', (e) => {
@@ -1231,8 +1436,7 @@ export async function initSettingsUI(deps) {
     function renderStatusesList(preserveOpen) {
         const cfg = deps.getConfig();
         const openSet = preserveOpen ? captureOpenCardKeys(elStatusesEditor) : new Set();
-        const gAName = cfg.gauges?.gauge_a?.name || '状态槽A';
-        const gBName = cfg.gauges?.gauge_b?.name || '状态槽B';
+        const gaugeEntries = getGaugeEntries(cfg);
 
         elStatusesEditor.innerHTML = (cfg.statuses || []).map((st, idx) => {
             const cardKey = `st:${st.id}`;
@@ -1269,8 +1473,10 @@ export async function initSettingsUI(deps) {
                         <div class="stcf-grid-4">
                             <label class="stcf-mini-field"><span>每回合 HP</span><input type="number" class="text_pole" data-field="perTurnHp" value="${st.perTurnHp ?? 0}"></label>
                             <label class="stcf-mini-field"><span>每回合 MP</span><input type="number" class="text_pole" data-field="perTurnMp" value="${st.perTurnMp ?? 0}"></label>
-                            <label class="stcf-mini-field"><span>每回合${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="perTurnGaugeA" value="${st.perTurnGaugeA ?? 0}"></label>
-                            <label class="stcf-mini-field"><span>每回合${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="perTurnGaugeB" value="${st.perTurnGaugeB ?? 0}"></label>
+                            ${gaugeEntries.map(g => {
+                                const gv = st.perTurnGauges?.[g.id] ?? (g.id === 'gauge_a' ? st.perTurnGaugeA : (g.id === 'gauge_b' ? st.perTurnGaugeB : 0));
+                                return `<label class="stcf-mini-field"><span>每回合${escapeHtml(g.name)}</span><input type="number" class="text_pole" data-status-tick-gauge="${escapeHtml(g.id)}" value="${gv ?? 0}"></label>`;
+                            }).join('')}
                         </div>
                         <div class="stcf-grid-3">
                             <label class="stcf-mini-field"><span>物攻倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="atkMultiplier" value="${st.atkMultiplier}"></label>
@@ -1314,6 +1520,20 @@ export async function initSettingsUI(deps) {
         }).join('');
     }
 
+    elStatusesEditor.addEventListener('input', (e) => {
+        if (!e.target.dataset.statusTickGauge) return;
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const st = deps.getConfig().statuses[Number(card.dataset.index)];
+        if (!st) return;
+        const gid = e.target.dataset.statusTickGauge;
+        const val = Math.round(Number(e.target.value) || 0);
+        if (!st.perTurnGauges || typeof st.perTurnGauges !== 'object') st.perTurnGauges = {};
+        if (val === 0) delete st.perTurnGauges[gid]; else st.perTurnGauges[gid] = val;
+        if (gid === 'gauge_a') st.perTurnGaugeA = val;
+        if (gid === 'gauge_b') st.perTurnGaugeB = val;
+        commitChange();
+    });
     elStatusesEditor.addEventListener('change', (e) => {
         if (!e.target.dataset.statusExpireId) return;
         const card = e.target.closest('.stcf-item-card');
@@ -1359,8 +1579,7 @@ export async function initSettingsUI(deps) {
     function renderRulesList(preserveOpen) {
         const cfg = deps.getConfig();
         const openSet = preserveOpen ? captureOpenCardKeys(elRulesEditor) : new Set();
-        const gAName = cfg.gauges?.gauge_a?.name || '状态槽A';
-        const gBName = cfg.gauges?.gauge_b?.name || '状态槽B';
+        const gaugeEntries = getGaugeEntries(cfg);
         const allUnits = [...(cfg.allies || []), ...(cfg.enemies || [])];
 
         elRulesEditor.innerHTML = (cfg.triggerRules || []).map((r, idx) => {
@@ -1412,8 +1631,7 @@ export async function initSettingsUI(deps) {
                                     <option value="hp" ${r.conditionType === 'hp' ? 'selected' : ''}>当前 HP 数值</option>
                                     <option value="hp_percent" ${r.conditionType === 'hp_percent' ? 'selected' : ''}>当前 HP 百分比(%)</option>
                                     <option value="mp" ${r.conditionType === 'mp' ? 'selected' : ''}>当前 MP 数值</option>
-                                    <option value="gauge_a" ${r.conditionType === 'gauge_a' ? 'selected' : ''}>${escapeHtml(gAName)} (0-100)</option>
-                                    <option value="gauge_b" ${r.conditionType === 'gauge_b' ? 'selected' : ''}>${escapeHtml(gBName)} (0-100)</option>
+                                    ${gaugeEntries.map(g => `<option value="${escapeHtml(g.id)}" ${r.conditionType === g.id ? 'selected' : ''}>${escapeHtml(g.name)} (${g.min}~${g.max})</option>`).join('')}
                                     <option value="has_status" ${r.conditionType === 'has_status' ? 'selected' : ''}>持有指定状态</option>
                                 </select>
                             </label>
@@ -1446,8 +1664,7 @@ export async function initSettingsUI(deps) {
                             <label class="stcf-mini-field"><span>触发后清零状态槽(仅达标一次)</span>
                                 <select class="text_pole" data-field="resetGaugeOnTrigger">
                                     <option value="" ${!r.resetGaugeOnTrigger ? 'selected' : ''}>不清零</option>
-                                    <option value="gauge_a" ${r.resetGaugeOnTrigger === 'gauge_a' ? 'selected' : ''}>清零 ${escapeHtml(gAName)}</option>
-                                    <option value="gauge_b" ${r.resetGaugeOnTrigger === 'gauge_b' ? 'selected' : ''}>清零 ${escapeHtml(gBName)}</option>
+                                    ${gaugeEntries.map(g => `<option value="${escapeHtml(g.id)}" ${r.resetGaugeOnTrigger === g.id ? 'selected' : ''}>重置 ${escapeHtml(g.name)} 为 ${g.min}</option>`).join('')}
                                 </select>
                             </label>
                         </div>
@@ -1548,14 +1765,6 @@ export async function initSettingsUI(deps) {
         elOutputMode.value = cfg.general.outputMode || 'fill_input';
         elFillStrategy.value = cfg.general.inputFillStrategy || 'append';
         elLogHeader.value = cfg.general.logHeaderTemplate || '';
-        elGaugeAName.value = cfg.gauges?.gauge_a?.name || '状态槽A';
-        elGaugeAColor.value = cfg.gauges?.gauge_a?.color || '#e67e22';
-        elGaugeATick.value = String(cfg.gauges?.gauge_a?.perTurnChange ?? 0);
-        elGaugeAScope.value = cfg.gauges?.gauge_a?.perTurnScope || 'all';
-        elGaugeBName.value = cfg.gauges?.gauge_b?.name || '状态槽B';
-        elGaugeBColor.value = cfg.gauges?.gauge_b?.color || '#9b59b6';
-        elGaugeBTick.value = String(cfg.gauges?.gauge_b?.perTurnChange ?? 0);
-        elGaugeBScope.value = cfg.gauges?.gauge_b?.perTurnScope || 'all';
 
         const prog = cfg.progression || { enabled: true, pointsPerLevel: 3, statGains: {} };
         const gains = prog.statGains || {};
@@ -1568,6 +1777,7 @@ export async function initSettingsUI(deps) {
         elGainDef.value = String(gains.defPhys ?? 2);
         elGainMdef.value = String(gains.mdefMag ?? 2);
 
+        renderGaugesList(preserveOpen);
         renderWorldviewsPicker();
         renderClassesList(preserveOpen);
         renderUnitsList('ally', elAlliesEditor, preserveOpen);

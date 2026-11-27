@@ -11,7 +11,7 @@
  *    - combat.reinforce_enemy_ids: string[] (AI 战中增援请求，确认或忽略后自动清空)
  */
 
-import { clamp, deepClone, getSTContext } from './config.js';
+import { clamp, deepClone, getGaugeEntries, getSTContext } from './config.js';
 import { findClassById, findEquipmentById, findItemById, findSkillById, findStatusDefById, syncUnitEquipmentEffects } from './engine.js';
 
 /**
@@ -378,13 +378,16 @@ export function pullFromMvuZod(config, battleState) {
                     const nextMp = clamp(Math.round(Number(mvuAlly.mp)), 0, live.maxMp);
                     if (live.mp !== nextMp) { live.mp = nextMp; changed = true; }
                 }
-                if (Number.isFinite(Number(mvuAlly.gauge_a))) {
-                    const nextGA = clamp(Math.round(Number(mvuAlly.gauge_a)), 0, 100);
-                    if (live.gauges.gauge_a !== nextGA) { live.gauges.gauge_a = nextGA; changed = true; }
-                }
-                if (Number.isFinite(Number(mvuAlly.gauge_b))) {
-                    const nextGB = clamp(Math.round(Number(mvuAlly.gauge_b)), 0, 100);
-                    if (live.gauges.gauge_b !== nextGB) { live.gauges.gauge_b = nextGB; changed = true; }
+                if (!live.gauges || typeof live.gauges !== 'object') live.gauges = {};
+                for (const gDef of getGaugeEntries(config)) {
+                    const rawVal = mvuAlly.gauges?.[gDef.id] !== undefined ? mvuAlly.gauges[gDef.id] : mvuAlly[gDef.id];
+                    if (Number.isFinite(Number(rawVal))) {
+                        const nextG = clamp(Math.round(Number(rawVal)), gDef.min, gDef.max);
+                        if (live.gauges[gDef.id] !== nextG) {
+                            live.gauges[gDef.id] = nextG;
+                            changed = true;
+                        }
+                    }
                 }
 
                 // 同步 MVU 中的临时 Buff/Debuff（保留由装备/阈值派生的状态）
@@ -476,11 +479,12 @@ export function applyMvuVitalsOnBattleStart(battleState, config) {
         if (Number.isFinite(Number(src.mp))) {
             ally.mp = clamp(Math.round(Number(src.mp)), 0, ally.maxMp);
         }
-        if (Number.isFinite(Number(src.gauge_a))) {
-            ally.gauges.gauge_a = clamp(Math.round(Number(src.gauge_a)), 0, 100);
-        }
-        if (Number.isFinite(Number(src.gauge_b))) {
-            ally.gauges.gauge_b = clamp(Math.round(Number(src.gauge_b)), 0, 100);
+        if (!ally.gauges || typeof ally.gauges !== 'object') ally.gauges = {};
+        for (const gDef of getGaugeEntries(config)) {
+            const rawVal = src.gauges?.[gDef.id] !== undefined ? src.gauges[gDef.id] : src[gDef.id];
+            if (Number.isFinite(Number(rawVal))) {
+                ally.gauges[gDef.id] = clamp(Math.round(Number(rawVal)), gDef.min, gDef.max);
+            }
         }
         // 若日常剧情里通过 MVU 挂上了临时异常/增益状态，开战时自动带入战场
         if (config.general?.mvuSyncStatuses !== false && Array.isArray(src.statuses)) {
@@ -520,6 +524,17 @@ export async function pushToMvuZod(config, battleState, options = {}) {
         if (!nextAllies[tpl.id] && !tpl.enabled && !live) continue;
 
         const prevAlly = nextAllies[tpl.id] || {};
+        const gaugeEntries = getGaugeEntries(config);
+        const nextGaugesMap = {};
+        for (const gDef of gaugeEntries) {
+            const fallbackInit = tpl.initialGauges?.[gDef.id]
+                ?? (gDef.id === 'gauge_a' ? tpl.initialGaugeA : (gDef.id === 'gauge_b' ? tpl.initialGaugeB : gDef.min));
+            const prevVal = prevAlly.gauges?.[gDef.id] !== undefined ? prevAlly.gauges[gDef.id] : prevAlly[gDef.id];
+            nextGaugesMap[gDef.id] = live
+                ? (live.gauges?.[gDef.id] ?? gDef.min)
+                : (Number.isFinite(Number(prevVal)) ? Number(prevVal) : (fallbackInit ?? gDef.min));
+        }
+
         const allyRecord = {
             ...prevAlly,
             level: live ? (live.level || 1) : (tpl.level || 1),
@@ -528,11 +543,20 @@ export async function pushToMvuZod(config, battleState, options = {}) {
             allocated: deepClone(live ? (live.allocated || tpl.allocated) : (tpl.allocated || { vit: 0, str: 0, spi: 0, def: 0, mdef: 0 })),
             hp: live ? live.hp : (Number.isFinite(Number(prevAlly.hp)) ? prevAlly.hp : tpl.maxHp),
             mp: live ? live.mp : (Number.isFinite(Number(prevAlly.mp)) ? prevAlly.mp : tpl.maxMp),
-            gauge_a: live ? (live.gauges?.gauge_a ?? 0) : (Number.isFinite(Number(prevAlly.gauge_a)) ? prevAlly.gauge_a : tpl.initialGaugeA),
-            gauge_b: live ? (live.gauges?.gauge_b ?? 0) : (Number.isFinite(Number(prevAlly.gauge_b)) ? prevAlly.gauge_b : tpl.initialGaugeB),
+            gauge_a: nextGaugesMap.gauge_a ?? (Number.isFinite(Number(prevAlly.gauge_a)) ? prevAlly.gauge_a : 0),
+            gauge_b: nextGaugesMap.gauge_b ?? (Number.isFinite(Number(prevAlly.gauge_b)) ? prevAlly.gauge_b : 0),
             equipmentIds: [...(live ? (live.equipmentIds || []) : (tpl.equipmentIds || []))],
             skillIds: [...(live ? (live.skillIds || []) : (tpl.skillIds || []))],
         };
+        const hasExtraGauges = gaugeEntries.some(g => g.id !== 'gauge_a' && g.id !== 'gauge_b');
+        if (hasExtraGauges || (prevAlly.gauges && typeof prevAlly.gauges === 'object')) {
+            allyRecord.gauges = { ...(prevAlly.gauges || {}), ...nextGaugesMap };
+        }
+        for (const gDef of gaugeEntries) {
+            if (gDef.id !== 'gauge_a' && gDef.id !== 'gauge_b' && Object.prototype.hasOwnProperty.call(prevAlly, gDef.id)) {
+                allyRecord[gDef.id] = nextGaugesMap[gDef.id];
+            }
+        }
         if (config.general?.mvuSyncStatuses !== false) {
             allyRecord.statuses = live
                 ? serializeStatusesForMvu(live.statuses, config)

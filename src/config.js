@@ -10,6 +10,69 @@
 export const EXTENSION_KEY = 'st_combat_framework';
 export const MAX_UNITS_PER_SIDE = 4; // 最多支持 4v4
 
+const RESERVED_GAUGE_IDS = new Set([
+    'hp', 'max_hp', 'mp', 'max_mp', 'atk', 'spi', 'def', 'mdef', 'level', 'has_status', 'hp_percent',
+]);
+
+/** 清洗状态槽 ID（仅允许英文/数字/下划线且不与基础属性冲突） */
+export function sanitizeGaugeId(rawId, fallbackId = 'gauge_custom') {
+    let id = String(rawId || '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!id || /^[0-9]/.test(id)) id = `g_${id || 'custom'}`;
+    if (RESERVED_GAUGE_IDS.has(id)) id = `gauge_${id}`;
+    return id || fallbackId;
+}
+
+/** 规范化单个状态槽定义（支持自定义 min/max、颜色与每回合自动增减） */
+export function normalizeGaugeDef(id, rawG, fallback = {}) {
+    const cleanId = sanitizeGaugeId(id, 'gauge_a');
+    const minVal = Number.isFinite(Number(rawG?.min)) ? Math.round(Number(rawG.min)) : (Number.isFinite(Number(fallback.min)) ? Math.round(Number(fallback.min)) : 0);
+    const rawMax = Number.isFinite(Number(rawG?.max)) ? Math.round(Number(rawG.max)) : (Number.isFinite(Number(fallback.max)) ? Math.round(Number(fallback.max)) : 100);
+    const maxVal = Math.max(minVal + 1, rawMax);
+    return {
+        id: cleanId,
+        name: String(rawG?.name ?? fallback.name ?? cleanId).trim() || cleanId,
+        color: String(rawG?.color || fallback.color || '#3498db').trim() || '#3498db',
+        min: minVal,
+        max: maxVal,
+        perTurnChange: Number.isFinite(Number(rawG?.perTurnChange)) ? Math.round(Number(rawG.perTurnChange)) : (fallback.perTurnChange || 0),
+        perTurnScope: ['all', 'allies', 'enemies'].includes(rawG?.perTurnScope) ? rawG.perTurnScope : (fallback.perTurnScope || 'all'),
+    };
+}
+
+/** 获取当前配置中全部自定义状态槽有序列表 */
+export function getGaugeEntries(config) {
+    const map = config?.gauges;
+    if (!map || typeof map !== 'object') return [];
+    const list = [];
+    for (const [key, def] of Object.entries(map)) {
+        if (!def || typeof def !== 'object') continue;
+        list.push(normalizeGaugeDef(def.id || key, def));
+    }
+    return list;
+}
+
+/** 规范化状态槽数值映射（向下兼容旧版 gauge_a / gauge_b 独立字段） */
+function normalizeGaugeDeltaMap(rawMap, legacyA, legacyB) {
+    const map = {};
+    if (rawMap && typeof rawMap === 'object' && !Array.isArray(rawMap)) {
+        for (const [k, v] of Object.entries(rawMap)) {
+            const num = Number(v);
+            if (Number.isFinite(num) && num !== 0) {
+                map[sanitizeGaugeId(k, k)] = num;
+            }
+        }
+    }
+    const numA = Number(legacyA);
+    if (map.gauge_a === undefined && Number.isFinite(numA) && numA !== 0) {
+        map.gauge_a = numA;
+    }
+    const numB = Number(legacyB);
+    if (map.gauge_b === undefined && Number.isFinite(numB) && numB !== 0) {
+        map.gauge_b = numB;
+    }
+    return map;
+}
+
 /** 缓存读取到的默认配置 */
 let cachedDefaultConfig = null;
 
@@ -126,8 +189,13 @@ function normalizeUnitTemplate(rawUnit, side, index) {
         spi: Math.max(0, Number(rawUnit?.spi ?? 15) || 0),
         def: Math.max(0, Number(rawUnit?.def ?? 5) || 0),
         mdef: Math.max(0, Number(rawUnit?.mdef ?? 5) || 0),
-        initialGaugeA: clamp(rawUnit?.initialGaugeA ?? 0, 0, 100),
-        initialGaugeB: clamp(rawUnit?.initialGaugeB ?? 0, 0, 100),
+        initialGaugeA: Number.isFinite(Number(rawUnit?.initialGauges?.gauge_a ?? rawUnit?.initialGaugeA))
+            ? Number(rawUnit?.initialGauges?.gauge_a ?? rawUnit?.initialGaugeA)
+            : 0,
+        initialGaugeB: Number.isFinite(Number(rawUnit?.initialGauges?.gauge_b ?? rawUnit?.initialGaugeB))
+            ? Number(rawUnit?.initialGauges?.gauge_b ?? rawUnit?.initialGaugeB)
+            : 0,
+        initialGauges: normalizeGaugeDeltaMap(rawUnit?.initialGauges, rawUnit?.initialGaugeA, rawUnit?.initialGaugeB),
         skillIds: Array.isArray(rawUnit?.skillIds) ? rawUnit.skillIds.map(String) : [],
         equipmentIds: Array.isArray(rawUnit?.equipmentIds) ? rawUnit.equipmentIds.map(String) : [],
         aiStrategy: ['priority', 'weighted', 'random'].includes(rawUnit?.aiStrategy) ? rawUnit.aiStrategy : 'priority',
@@ -202,10 +270,12 @@ export function normalizeSkill(sk, idx = 0) {
             : 'damage',
         formula: String(sk?.formula ?? '10'),
         selfHpFormula: String(sk?.selfHpFormula ?? '0'),
-        selfGaugeAChange: Number.isFinite(Number(sk?.selfGaugeAChange)) ? Number(sk.selfGaugeAChange) : 0,
-        selfGaugeBChange: Number.isFinite(Number(sk?.selfGaugeBChange)) ? Number(sk.selfGaugeBChange) : 0,
-        targetGaugeAChange: Number.isFinite(Number(sk?.targetGaugeAChange)) ? Number(sk.targetGaugeAChange) : 0,
-        targetGaugeBChange: Number.isFinite(Number(sk?.targetGaugeBChange)) ? Number(sk.targetGaugeBChange) : 0,
+        selfGaugeAChange: Number.isFinite(Number(sk?.selfGaugeChanges?.gauge_a ?? sk?.selfGaugeAChange)) ? Number(sk?.selfGaugeChanges?.gauge_a ?? sk?.selfGaugeAChange) : 0,
+        selfGaugeBChange: Number.isFinite(Number(sk?.selfGaugeChanges?.gauge_b ?? sk?.selfGaugeBChange)) ? Number(sk?.selfGaugeChanges?.gauge_b ?? sk?.selfGaugeBChange) : 0,
+        targetGaugeAChange: Number.isFinite(Number(sk?.targetGaugeChanges?.gauge_a ?? sk?.targetGaugeAChange)) ? Number(sk?.targetGaugeChanges?.gauge_a ?? sk?.targetGaugeAChange) : 0,
+        targetGaugeBChange: Number.isFinite(Number(sk?.targetGaugeChanges?.gauge_b ?? sk?.targetGaugeBChange)) ? Number(sk?.targetGaugeChanges?.gauge_b ?? sk?.targetGaugeBChange) : 0,
+        selfGaugeChanges: normalizeGaugeDeltaMap(sk?.selfGaugeChanges, sk?.selfGaugeAChange, sk?.selfGaugeBChange),
+        targetGaugeChanges: normalizeGaugeDeltaMap(sk?.targetGaugeChanges, sk?.targetGaugeAChange, sk?.targetGaugeBChange),
         applyStatuses,
         requiredTargetStatusIds: normalizeIdList(sk?.requiredTargetStatusIds),
         requiredSelfStatusIds: normalizeIdList(sk?.requiredSelfStatusIds),
@@ -290,8 +360,9 @@ export function normalizeItem(rawItem, idx = 0) {
             ? rawItem.effectType
             : 'heal',
         formula: String(rawItem?.formula ?? '30'),
-        targetGaugeAChange: Number.isFinite(Number(rawItem?.targetGaugeAChange)) ? Number(rawItem.targetGaugeAChange) : 0,
-        targetGaugeBChange: Number.isFinite(Number(rawItem?.targetGaugeBChange)) ? Number(rawItem.targetGaugeBChange) : 0,
+        targetGaugeAChange: Number.isFinite(Number(rawItem?.targetGaugeChanges?.gauge_a ?? rawItem?.targetGaugeAChange)) ? Number(rawItem?.targetGaugeChanges?.gauge_a ?? rawItem?.targetGaugeAChange) : 0,
+        targetGaugeBChange: Number.isFinite(Number(rawItem?.targetGaugeChanges?.gauge_b ?? rawItem?.targetGaugeBChange)) ? Number(rawItem?.targetGaugeChanges?.gauge_b ?? rawItem?.targetGaugeBChange) : 0,
+        targetGaugeChanges: normalizeGaugeDeltaMap(rawItem?.targetGaugeChanges, rawItem?.targetGaugeAChange, rawItem?.targetGaugeBChange),
         applyStatuses,
         consumesTurn: rawItem?.consumesTurn !== false,
     };
@@ -358,27 +429,36 @@ export function normalizeConfig(rawConfig, defaults) {
     const rawClasses = Array.isArray(src.classTrees) ? src.classTrees : (base.classTrees || []);
     const classTrees = rawClasses.map((c, idx) => normalizeClassNode(c, idx));
 
-    // 2. 特殊计量条定义（固定 2 个：gauge_a、gauge_b，范围 0-100，v1.2 支持每回合自动增减）
-    const normalizeGaugeDef = (rawG, baseG) => ({
-        ...baseG,
-        ...(rawG || {}),
-        min: 0,
-        max: 100,
-        perTurnChange: Number.isFinite(Number(rawG?.perTurnChange)) ? Math.round(Number(rawG.perTurnChange)) : (baseG.perTurnChange || 0),
-        perTurnScope: ['all', 'allies', 'enemies'].includes(rawG?.perTurnScope) ? rawG.perTurnScope : (baseG.perTurnScope || 'all'),
-    });
-    const gauges = {
-        gauge_a: normalizeGaugeDef(src.gauges?.gauge_a, base.gauges.gauge_a),
-        gauge_b: normalizeGaugeDef(src.gauges?.gauge_b, base.gauges.gauge_b),
-    };
+    // 2. 自定义特殊计量条定义（v1.8 升级：支持任意数量自定义状态槽，向下兼容旧版 gauge_a / gauge_b）
+    const gauges = {};
+    const rawGauges = src.gauges;
+    if (Array.isArray(rawGauges)) {
+        rawGauges.forEach((g, idx) => {
+            if (!g || typeof g !== 'object') return;
+            const id = sanitizeGaugeId(g.id || `gauge_${idx + 1}`, `gauge_${idx + 1}`);
+            gauges[id] = normalizeGaugeDef(id, g, base.gauges?.[id] || {});
+        });
+    } else if (rawGauges && typeof rawGauges === 'object') {
+        for (const [key, val] of Object.entries(rawGauges)) {
+            if (!val || typeof val !== 'object') continue;
+            const id = sanitizeGaugeId(val.id || key, key);
+            gauges[id] = normalizeGaugeDef(id, val, base.gauges?.[id] || {});
+        }
+    } else {
+        for (const [key, val] of Object.entries(base.gauges || {})) {
+            const id = sanitizeGaugeId(key, key);
+            gauges[id] = normalizeGaugeDef(id, val, val);
+        }
+    }
+    const validGaugeIds = new Set(Object.keys(gauges));
 
-    // 3. 状态（Buff/Debuff）库（v1.2 支持自由组合效果：跳过回合 + 多属性每回合变化 + 攻防倍率 + 到期转化）
+    // 3. 状态（Buff/Debuff）库（v1.2 组合效果 + v1.8 动态状态槽每回合增减 perTurnGauges）
     const rawStatuses = Array.isArray(src.statuses) ? src.statuses : base.statuses;
     const statuses = rawStatuses.map((st, idx) => {
-        // 向下兼容 v1.0/v1.1 的单字段 targetStat + value 以及 effectType === 'skip_turn'
         const hasNewPerTurn = st && (
             st.perTurnHp !== undefined || st.perTurnMp !== undefined
             || st.perTurnGaugeA !== undefined || st.perTurnGaugeB !== undefined
+            || (st.perTurnGauges && typeof st.perTurnGauges === 'object')
         );
         const legacyVal = Number.isFinite(Number(st?.value)) ? Number(st.value) : 0;
         const legacyStat = st?.targetStat || 'hp';
@@ -389,12 +469,16 @@ export function normalizeConfig(rawConfig, defaults) {
         const perTurnMp = hasNewPerTurn
             ? (Number.isFinite(Number(st?.perTurnMp)) ? Math.round(Number(st.perTurnMp)) : 0)
             : (legacyStat === 'mp' ? Math.round(legacyVal) : 0);
-        const perTurnGaugeA = hasNewPerTurn
-            ? (Number.isFinite(Number(st?.perTurnGaugeA)) ? Math.round(Number(st.perTurnGaugeA)) : 0)
+        const legacyGA = hasNewPerTurn
+            ? (Number.isFinite(Number(st?.perTurnGauges?.gauge_a ?? st?.perTurnGaugeA)) ? Math.round(Number(st?.perTurnGauges?.gauge_a ?? st?.perTurnGaugeA)) : 0)
             : (legacyStat === 'gauge_a' ? Math.round(legacyVal) : 0);
-        const perTurnGaugeB = hasNewPerTurn
-            ? (Number.isFinite(Number(st?.perTurnGaugeB)) ? Math.round(Number(st.perTurnGaugeB)) : 0)
+        const legacyGB = hasNewPerTurn
+            ? (Number.isFinite(Number(st?.perTurnGauges?.gauge_b ?? st?.perTurnGaugeB)) ? Math.round(Number(st?.perTurnGauges?.gauge_b ?? st?.perTurnGaugeB)) : 0)
             : (legacyStat === 'gauge_b' ? Math.round(legacyVal) : 0);
+        const perTurnGauges = normalizeGaugeDeltaMap(st?.perTurnGauges, legacyGA, legacyGB);
+        if (!hasNewPerTurn && validGaugeIds.has(legacyStat) && legacyVal !== 0) {
+            perTurnGauges[legacyStat] = Math.round(legacyVal);
+        }
 
         const skipTurn = st?.skipTurn !== undefined ? Boolean(st.skipTurn) : st?.effectType === 'skip_turn';
 
@@ -406,8 +490,9 @@ export function normalizeConfig(rawConfig, defaults) {
             skipTurn,
             perTurnHp,
             perTurnMp,
-            perTurnGaugeA,
-            perTurnGaugeB,
+            perTurnGaugeA: perTurnGauges.gauge_a ?? 0,
+            perTurnGaugeB: perTurnGauges.gauge_b ?? 0,
+            perTurnGauges,
             atkMultiplier: Number.isFinite(Number(st?.atkMultiplier)) ? Number(st.atkMultiplier) : 1,
             spiMultiplier: Number.isFinite(Number(st?.spiMultiplier)) ? Number(st.spiMultiplier) : 1,
             defMultiplier: Number.isFinite(Number(st?.defMultiplier)) ? Number(st.defMultiplier) : 1,
@@ -440,30 +525,35 @@ export function normalizeConfig(rawConfig, defaults) {
     const allies = rawAllies.slice(0, MAX_UNITS_PER_SIDE).map((u, idx) => normalizeUnitTemplate(u, 'ally', idx));
     const enemies = rawEnemies.map((u, idx) => normalizeUnitTemplate(u, 'enemy', idx));
 
-    // 7. 阈值触发规则（支持 Prompt 注入 + 状态满/空自动挂载 Buff）
+    // 7. 阈值触发规则（支持 Prompt 注入 + 状态满/空自动挂载 Buff + 任意自定义状态槽）
     const rawRules = Array.isArray(src.triggerRules) ? src.triggerRules : base.triggerRules;
-    const triggerRules = rawRules.map((r, idx) => ({
-        id: String(r?.id || `rule_${idx + 1}`).trim() || `rule_${idx + 1}`,
-        name: String(r?.name ?? `rule_${idx + 1}`).trim() || `rule_${idx + 1}`,
-        enabled: r?.enabled !== false,
-        scope: ['any_ally', 'all_allies', 'any_enemy', 'all_enemies', 'specific_unit'].includes(r?.scope)
-            ? r.scope
-            : 'any_ally',
-        unitId: String(r?.unitId || ''),
-        conditionType: ['hp', 'hp_percent', 'mp', 'gauge_a', 'gauge_b', 'has_status'].includes(r?.conditionType)
-            ? r.conditionType
-            : 'hp',
-        operator: ['<=', '<', '>=', '>', '=='].includes(r?.operator) ? r.operator : '<=',
-        threshold: Number.isFinite(Number(r?.threshold)) ? Number(r.threshold) : 0,
-        statusId: String(r?.statusId || ''),
-        grantStatusIds: normalizeIdList(r?.grantStatusIds, r?.grantStatusId),
-        grantStatusMode: r?.grantStatusMode === 'on_enter' ? 'on_enter' : 'while_condition',
-        resetGaugeOnTrigger: ['gauge_a', 'gauge_b'].includes(r?.resetGaugeOnTrigger) ? r.resetGaugeOnTrigger : '',
-        position: ['in_chat', 'in_prompt', 'before_prompt'].includes(r?.position) ? r.position : 'in_chat',
-        depth: Math.max(0, Math.round(Number(r?.depth ?? 1) || 0)),
-        role: ['system', 'user', 'assistant'].includes(r?.role) ? r.role : 'system',
-        promptText: String(r?.promptText || ''),
-    }));
+    const baseCondTypes = new Set(['hp', 'hp_percent', 'mp', 'gauge_a', 'gauge_b', 'has_status']);
+    const triggerRules = rawRules.map((r, idx) => {
+        const rawCond = String(r?.conditionType || 'hp').trim();
+        const conditionType = (baseCondTypes.has(rawCond) || validGaugeIds.has(rawCond)) ? rawCond : 'hp';
+        const rawReset = String(r?.resetGaugeOnTrigger || '').trim();
+        const resetGaugeOnTrigger = (rawReset && (validGaugeIds.has(rawReset) || rawReset === 'gauge_a' || rawReset === 'gauge_b')) ? rawReset : '';
+        return {
+            id: String(r?.id || `rule_${idx + 1}`).trim() || `rule_${idx + 1}`,
+            name: String(r?.name ?? `rule_${idx + 1}`).trim() || `rule_${idx + 1}`,
+            enabled: r?.enabled !== false,
+            scope: ['any_ally', 'all_allies', 'any_enemy', 'all_enemies', 'specific_unit'].includes(r?.scope)
+                ? r.scope
+                : 'any_ally',
+            unitId: String(r?.unitId || ''),
+            conditionType,
+            operator: ['<=', '<', '>=', '>', '=='].includes(r?.operator) ? r.operator : '<=',
+            threshold: Number.isFinite(Number(r?.threshold)) ? Number(r.threshold) : 0,
+            statusId: String(r?.statusId || ''),
+            grantStatusIds: normalizeIdList(r?.grantStatusIds, r?.grantStatusId),
+            grantStatusMode: r?.grantStatusMode === 'on_enter' ? 'on_enter' : 'while_condition',
+            resetGaugeOnTrigger,
+            position: ['in_chat', 'in_prompt', 'before_prompt'].includes(r?.position) ? r.position : 'in_chat',
+            depth: Math.max(0, Math.round(Number(r?.depth ?? 1) || 0)),
+            role: ['system', 'user', 'assistant'].includes(r?.role) ? r.role : 'system',
+            promptText: String(r?.promptText || ''),
+        };
+    });
 
     return {
         schemaVersion: base.schemaVersion || 4,
@@ -705,11 +795,24 @@ export async function importConfigFromJsonText(jsonText, mode = 'replace', curre
             notes.push('成长与世界观设置');
         }
         if (parsed.gauges && typeof parsed.gauges === 'object') {
-            mergedRaw.gauges = {
-                gauge_a: { ...mergedRaw.gauges.gauge_a, ...(parsed.gauges.gauge_a || {}) },
-                gauge_b: { ...mergedRaw.gauges.gauge_b, ...(parsed.gauges.gauge_b || {}) },
-            };
-            notes.push('特殊槽');
+            if (!mergedRaw.gauges || typeof mergedRaw.gauges !== 'object') mergedRaw.gauges = {};
+            let gCount = 0;
+            if (Array.isArray(parsed.gauges)) {
+                for (const g of parsed.gauges) {
+                    if (!g || typeof g !== 'object') continue;
+                    const gid = sanitizeGaugeId(g.id || `gauge_${Object.keys(mergedRaw.gauges).length + 1}`);
+                    mergedRaw.gauges[gid] = { ...(mergedRaw.gauges[gid] || {}), ...g, id: gid };
+                    gCount++;
+                }
+            } else {
+                for (const [k, g] of Object.entries(parsed.gauges)) {
+                    if (!g || typeof g !== 'object') continue;
+                    const gid = sanitizeGaugeId(g.id || k, k);
+                    mergedRaw.gauges[gid] = { ...(mergedRaw.gauges[gid] || {}), ...g, id: gid };
+                    gCount++;
+                }
+            }
+            if (gCount > 0) notes.push(`${gCount} 个特殊状态槽`);
         }
 
         const sections = [

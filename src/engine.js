@@ -8,7 +8,7 @@
  * 5. 内置无 eval 的安全公式解析器，兼容 TauriTavern 严格 CSP 环境
  */
 
-import { MAX_UNITS_PER_SIDE, clamp } from './config.js';
+import { MAX_UNITS_PER_SIDE, clamp, getGaugeEntries } from './config.js';
 
 /**
  * =========================================================================
@@ -344,6 +344,11 @@ export function syncUnitEquipmentEffects(unit, config, fillNewMax = false) {
     }
     if (!Array.isArray(unit.equipmentIds)) unit.equipmentIds = [];
     if (!Array.isArray(unit.statuses)) unit.statuses = [];
+    if (!unit.gauges || typeof unit.gauges !== 'object') unit.gauges = {};
+    for (const gDef of getGaugeEntries(config)) {
+        const cur = unit.gauges[gDef.id];
+        unit.gauges[gDef.id] = clamp(Number.isFinite(Number(cur)) ? Number(cur) : gDef.min, gDef.min, gDef.max);
+    }
 
     const eqBonus = getUnitEquipmentBonuses(unit, config);
     const progBonus = getUnitProgressionBonuses(unit, config);
@@ -535,10 +540,16 @@ function instantiateUnit(tpl, side, config) {
         baseSpi: Number.isFinite(Number(tpl.spi)) ? Number(tpl.spi) : 15,
         baseDef: tpl.def,
         baseMdef: Number.isFinite(Number(tpl.mdef)) ? Number(tpl.mdef) : 5,
-        gauges: {
-            gauge_a: clamp(tpl.initialGaugeA ?? 0, 0, 100),
-            gauge_b: clamp(tpl.initialGaugeB ?? 0, 0, 100),
-        },
+        gauges: (() => {
+            const gMap = {};
+            const initMap = tpl.initialGauges && typeof tpl.initialGauges === 'object' ? tpl.initialGauges : {};
+            for (const gDef of getGaugeEntries(config)) {
+                const legacy = gDef.id === 'gauge_a' ? tpl.initialGaugeA : (gDef.id === 'gauge_b' ? tpl.initialGaugeB : undefined);
+                const rawVal = initMap[gDef.id] !== undefined ? initMap[gDef.id] : (legacy !== undefined ? legacy : gDef.min);
+                gMap[gDef.id] = clamp(rawVal, gDef.min, gDef.max);
+            }
+            return gMap;
+        })(),
         skillIds: Array.isArray(tpl.skillIds) ? [...tpl.skillIds] : [],
         equipmentIds: Array.isArray(tpl.equipmentIds) ? [...tpl.equipmentIds] : [],
         aiStrategy: ['priority', 'weighted', 'random'].includes(tpl.aiStrategy) ? tpl.aiStrategy : 'priority',
@@ -760,19 +771,48 @@ export function createBattleState(config, overrideEnemies = null) {
 }
 
 /**
- * 修改单位某项特殊计量条，并返回变化描述
+ * 修改单位某项特殊计量条，并返回变化描述（v1.8 支持任意自定义状态槽与自定义 min/max）
  */
 function applyGaugeDelta(unit, gaugeKey, delta, config) {
     const num = Math.round(Number(delta) || 0);
     if (num === 0) return '';
-    const before = unit.gauges[gaugeKey] ?? 0;
-    const after = clamp(before + num, 0, 100);
+    const gDef = config.gauges?.[gaugeKey];
+    const gMin = Number.isFinite(Number(gDef?.min)) ? Number(gDef.min) : 0;
+    const gMax = Number.isFinite(Number(gDef?.max)) ? Number(gDef.max) : 100;
+    if (!unit.gauges || typeof unit.gauges !== 'object') unit.gauges = {};
+    const before = Number.isFinite(Number(unit.gauges[gaugeKey])) ? Number(unit.gauges[gaugeKey]) : gMin;
+    const after = clamp(before + num, gMin, gMax);
     unit.gauges[gaugeKey] = after;
     const actualDelta = after - before;
     if (actualDelta === 0) return '';
-    const gaugeName = config.gauges?.[gaugeKey]?.name || gaugeKey;
+    const gaugeName = gDef?.name || gaugeKey;
     const sign = actualDelta > 0 ? '+' : '';
-    return `${gaugeName}${sign}${actualDelta}(${after}/100)`;
+    return `${gaugeName}${sign}${actualDelta}(${after}/${gMax})`;
+}
+
+/** 批量应用多条自定义状态槽增减（向下兼容旧版 gauge_a / gauge_b 独立字段） */
+function applyGaugeChanges(unit, changesMap, legacyA, legacyB, config) {
+    const merged = {};
+    if (changesMap && typeof changesMap === 'object') {
+        for (const [k, v] of Object.entries(changesMap)) {
+            const num = Math.round(Number(v) || 0);
+            if (num !== 0) merged[k] = num;
+        }
+    }
+    if (merged.gauge_a === undefined && Math.round(Number(legacyA) || 0) !== 0) {
+        merged.gauge_a = Math.round(Number(legacyA));
+    }
+    if (merged.gauge_b === undefined && Math.round(Number(legacyB) || 0) !== 0) {
+        merged.gauge_b = Math.round(Number(legacyB));
+    }
+    const notes = [];
+    for (const gDef of getGaugeEntries(config)) {
+        if (merged[gDef.id]) {
+            const note = applyGaugeDelta(unit, gDef.id, merged[gDef.id], config);
+            if (note) notes.push(note);
+        }
+    }
+    return notes;
 }
 
 /**
@@ -1001,8 +1041,7 @@ function performStruggleAction(state, config, actor, skill = null) {
     }
 
     if (skill) {
-        applyGaugeDelta(actor, 'gauge_a', skill.selfGaugeAChange, config);
-        applyGaugeDelta(actor, 'gauge_b', skill.selfGaugeBChange, config);
+        applyGaugeChanges(actor, skill.selfGaugeChanges, skill.selfGaugeAChange, skill.selfGaugeBChange, config);
     }
 
     appendBattleLog(state, `⛓️ ${actor.name} ${actionName}：${summaries.join('；')}。`);
@@ -1075,7 +1114,7 @@ function resolveTargets(state, actor, targetType, requestedTargetId) {
 function buildFormulaVars(actor, target, config) {
     const actorEff = getEffectiveStats(actor, config);
     const targetEff = getEffectiveStats(target, config);
-    return {
+    const vars = {
         atk: actorEff.atk,
         spi: actorEff.spi,
         def: actorEff.def,
@@ -1085,8 +1124,8 @@ function buildFormulaVars(actor, target, config) {
         max_hp: actor.maxHp,
         mp: actor.mp,
         max_mp: actor.maxMp,
-        gauge_a: actor.gauges.gauge_a,
-        gauge_b: actor.gauges.gauge_b,
+        gauge_a: actor.gauges?.gauge_a ?? 0,
+        gauge_b: actor.gauges?.gauge_b ?? 0,
         target_atk: targetEff.atk,
         target_spi: targetEff.spi,
         target_def: targetEff.def,
@@ -1094,9 +1133,14 @@ function buildFormulaVars(actor, target, config) {
         target_level: Math.max(1, Number(target.level) || 1),
         target_hp: target.hp,
         target_max_hp: target.maxHp,
-        target_gauge_a: target.gauges.gauge_a,
-        target_gauge_b: target.gauges.gauge_b,
+        target_gauge_a: target.gauges?.gauge_a ?? 0,
+        target_gauge_b: target.gauges?.gauge_b ?? 0,
     };
+    for (const gDef of getGaugeEntries(config)) {
+        vars[gDef.id] = actor.gauges?.[gDef.id] ?? gDef.min;
+        vars[`target_${gDef.id}`] = target.gauges?.[gDef.id] ?? gDef.min;
+    }
+    return vars;
 }
 
 /**
@@ -1277,11 +1321,6 @@ function performSkill(state, config, actor, skill, targetId) {
         }
     }
 
-    const selfGA = applyGaugeDelta(actor, 'gauge_a', skill.selfGaugeAChange, config);
-    const selfGB = applyGaugeDelta(actor, 'gauge_b', skill.selfGaugeBChange, config);
-    if (selfGA) selfNotes.push(selfGA);
-    if (selfGB) selfNotes.push(selfGB);
-
     // v1.6：支持同时向自身附加多个状态
     const applyEntries = getApplyStatusEntries(skill);
     for (const entry of applyEntries) {
@@ -1314,10 +1353,7 @@ function performSkill(state, config, actor, skill, targetId) {
             notes.push(`回复 ${target.mp - before} 点 MP/体力（当前 ${target.mp}/${target.maxMp}）`);
         }
 
-        const tGA = applyGaugeDelta(target, 'gauge_a', skill.targetGaugeAChange, config);
-        const tGB = applyGaugeDelta(target, 'gauge_b', skill.targetGaugeBChange, config);
-        if (tGA) notes.push(tGA);
-        if (tGB) notes.push(tGB);
+        notes.push(...applyGaugeChanges(target, skill.targetGaugeChanges, skill.targetGaugeAChange, skill.targetGaugeBChange, config));
 
         // v1.6：支持同时向目标附加多个状态（v1.7 传入施法者 actor 以支持打断施法者解除束缚）
         for (const entry of applyEntries) {
@@ -1329,6 +1365,9 @@ function performSkill(state, config, actor, skill, targetId) {
 
         targetSummaries.push(`对 ${target.name} ${notes.length ? notes.join('，') : '生效'}`);
     }
+
+    // 在主效果公式计算完成后再结算自身状态槽增减（支持“按当前层数结算伤害再消耗层数”的连击豆玩法）
+    selfNotes.push(...applyGaugeChanges(actor, skill.selfGaugeChanges, skill.selfGaugeAChange, skill.selfGaugeBChange, config));
 
     const mpNote = skill.mpCost > 0 ? `（消耗 ${skill.mpCost} MP）` : '';
     const selfSuffix = selfNotes.length ? `；自身：${selfNotes.join('，')}` : '';
@@ -1670,10 +1709,7 @@ export function executeUseItem(state, config, actorId, itemId, targetId) {
             notes.push(removed.length ? `清除了状态「${removed.join('、')}」` : '当前无临时状态可清除');
         }
 
-        const tGA = applyGaugeDelta(target, 'gauge_a', item.targetGaugeAChange, config);
-        const tGB = applyGaugeDelta(target, 'gauge_b', item.targetGaugeBChange, config);
-        if (tGA) notes.push(tGA);
-        if (tGB) notes.push(tGB);
+        notes.push(...applyGaugeChanges(target, item.targetGaugeChanges, item.targetGaugeAChange, item.targetGaugeBChange, config));
 
         for (const entry of getApplyStatusEntries(item)) {
             const stText = tryApplyStatus(target, entry.statusId, entry.chance, config, actor);
@@ -1836,8 +1872,7 @@ function runEnemyTurnAndRoundEnd(state, config) {
 }
 
 function runRoundEndSettlement(state, config) {
-    const gADef = config.gauges?.gauge_a;
-    const gBDef = config.gauges?.gauge_b;
+    const gaugeEntries = getGaugeEntries(config);
 
     const shouldApplyGaugeTick = (gaugeDef, unit) => {
         if (!gaugeDef || !Number(gaugeDef.perTurnChange)) return false;
@@ -1859,11 +1894,11 @@ function runRoundEndSettlement(state, config) {
                 const def = findStatusDefById(config, activeSt.statusId);
                 if (!def) continue;
 
-                // 兼容 v1.2 多属性组合变化（同时影响 HP、MP、状态槽A、状态槽B）
+                // 兼容 v1.2/v1.8 多属性与多自定义状态槽每回合变化
                 const hpDelta = Math.round(Number(def.perTurnHp ?? (def.targetStat === 'hp' ? def.value : 0)) || 0);
                 const mpDelta = Math.round(Number(def.perTurnMp ?? (def.targetStat === 'mp' ? def.value : 0)) || 0);
-                const gADelta = Math.round(Number(def.perTurnGaugeA ?? (def.targetStat === 'gauge_a' ? def.value : 0)) || 0);
-                const gBDelta = Math.round(Number(def.perTurnGaugeB ?? (def.targetStat === 'gauge_b' ? def.value : 0)) || 0);
+                const legacyGA = Math.round(Number(def.perTurnGaugeA ?? (def.targetStat === 'gauge_a' ? def.value : 0)) || 0);
+                const legacyGB = Math.round(Number(def.perTurnGaugeB ?? (def.targetStat === 'gauge_b' ? def.value : 0)) || 0);
 
                 const tickNotes = [];
                 if (hpDelta !== 0) {
@@ -1879,14 +1914,7 @@ function runRoundEndSettlement(state, config) {
                     const diff = unit.mp - before;
                     if (diff !== 0) tickNotes.push(`MP ${diff > 0 ? '+' : ''}${diff}（${unit.mp}/${unit.maxMp}）`);
                 }
-                if (gADelta !== 0) {
-                    const note = applyGaugeDelta(unit, 'gauge_a', gADelta, config);
-                    if (note) tickNotes.push(note);
-                }
-                if (gBDelta !== 0) {
-                    const note = applyGaugeDelta(unit, 'gauge_b', gBDelta, config);
-                    if (note) tickNotes.push(note);
-                }
+                tickNotes.push(...applyGaugeChanges(unit, def.perTurnGauges, legacyGA, legacyGB, config));
 
                 if (tickNotes.length > 0) {
                     appendBattleLog(state, `${unit.name} 因「${def.name}」${tickNotes.join('，')}。`);
@@ -1955,16 +1983,14 @@ function runRoundEndSettlement(state, config) {
             }
         }
 
-        // 2. v1.2：结算特殊状态条的每回合自动增减（仅对存活单位生效）
+        // 2. v1.2/v1.8：结算全部自定义特殊状态条的每回合自动增减（仅对存活单位生效）
         if (isAlive(unit)) {
             const passiveGaugeNotes = [];
-            if (shouldApplyGaugeTick(gADef, unit)) {
-                const note = applyGaugeDelta(unit, 'gauge_a', gADef.perTurnChange, config);
-                if (note) passiveGaugeNotes.push(note);
-            }
-            if (shouldApplyGaugeTick(gBDef, unit)) {
-                const note = applyGaugeDelta(unit, 'gauge_b', gBDef.perTurnChange, config);
-                if (note) passiveGaugeNotes.push(note);
+            for (const gDef of gaugeEntries) {
+                if (shouldApplyGaugeTick(gDef, unit)) {
+                    const note = applyGaugeDelta(unit, gDef.id, gDef.perTurnChange, config);
+                    if (note) passiveGaugeNotes.push(note);
+                }
             }
             if (passiveGaugeNotes.length > 0) {
                 appendBattleLog(state, `回合结算：${unit.name} ${passiveGaugeNotes.join('，')}。`);
@@ -1999,8 +2025,12 @@ export function adjustUnitStatManual(state, config, unitId, stat, delta) {
         unit.hp = clamp(unit.hp + num, 0, unit.maxHp);
     } else if (stat === 'mp') {
         unit.mp = clamp(unit.mp + num, 0, unit.maxMp);
-    } else if (stat === 'gauge_a' || stat === 'gauge_b') {
-        unit.gauges[stat] = clamp((unit.gauges[stat] ?? 0) + num, 0, 100);
+    } else if (config?.gauges?.[stat]) {
+        const gDef = config.gauges[stat];
+        const gMin = Number.isFinite(Number(gDef.min)) ? Number(gDef.min) : 0;
+        const gMax = Number.isFinite(Number(gDef.max)) ? Number(gDef.max) : 100;
+        if (!unit.gauges || typeof unit.gauges !== 'object') unit.gauges = {};
+        unit.gauges[stat] = clamp((unit.gauges[stat] ?? gMin) + num, gMin, gMax);
     } else {
         return false;
     }
