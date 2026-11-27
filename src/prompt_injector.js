@@ -330,6 +330,13 @@ export function buildAiContextSnapshot(battleState, config) {
             const stText = (u.statuses || []).map(st => {
                 const def = findStatusDefById(config, st.statusId);
                 if (!def) return '';
+                if (def.restraintType) {
+                    if (def.restraintSourceMode === 'object' && st.objectHp > 0) {
+                        const objName = def.restraintObjectName || def.name;
+                        return `${objName}[禁锢道具HP:${st.objectHp}/${st.objectMaxHp || st.objectHp}]`;
+                    }
+                    return `${def.name}[被束缚·${st.remainingTurns}T]`;
+                }
                 const tag = st.source === 'equipment' ? '装备常驻' : (st.source === 'threshold' ? '阈值维持' : `${st.remainingTurns}T`);
                 return `${def.name}(${tag})`;
             }).filter(Boolean).join('、') || '无';
@@ -339,8 +346,11 @@ export function buildAiContextSnapshot(battleState, config) {
             return `- ${u.name}${aliveTag} HP:${u.hp}/${u.maxHp} MP:${u.mp}/${u.maxMp} 物攻:${eff.atk} 精神:${eff.spi} 物防:${eff.def} 法抗:${eff.mdef}${gaugesStr ? ` ${gaugesStr}` : ''}｜状态:${stText}${desc}`;
         };
 
+        const phaseNote = battleState.phase === 'victory'
+            ? ' · 战斗已胜利'
+            : (battleState.phase === 'defeat' ? ' · 战斗已失败' : '');
         const battleLines = [
-            `[TRPG 实时战况 · 第 ${battleState.turn} 回合]`,
+            `[TRPG 实时战况 · 第 ${battleState.turn} 回合${phaseNote}]`,
             '我方：',
             ...(battleState.allies || []).map(formatUnitLine),
             '敌方：',

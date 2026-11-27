@@ -14,12 +14,14 @@ import {
     addEnemyToBattle,
     adjustUnitStatManual,
     allocateStatPoint,
+    applyExternalStatusToUnit,
     changeUnitClass,
     checkSkillPrerequisite,
     createBattleState,
     endPlayerTurn,
     equipItemOnUnit,
     executeAllyAction,
+    executeDefendWaitAction,
     executeStruggleAction,
     executeUseItem,
     findClassById,
@@ -194,6 +196,7 @@ export async function initHudUI(deps) {
     const elBtnEndTurn = root.querySelector('#stcf-btn-end-turn');
     const elBtnCopyLog = root.querySelector('#stcf-btn-copy-log');
     const elBtnFillInput = root.querySelector('#stcf-btn-fill-input');
+    const elBtnFinishBattle = root.querySelector('#stcf-btn-finish-battle');
     const elBtnClearRoundLog = root.querySelector('#stcf-btn-clear-round-log');
     const elLogList = root.querySelector('#stcf-log-list');
     const elToast = root.querySelector('#stcf-toast');
@@ -378,6 +381,18 @@ export async function initHudUI(deps) {
         showToast(ok ? '✏️ 已将战报填入输入框（未发送）' : '⚠️ 未找到聊天输入框');
     });
 
+    elBtnFinishBattle?.addEventListener('click', () => {
+        const state = deps.getBattleState();
+        if (!state || !state.active) return;
+        const finished = state.phase === 'victory' || state.phase === 'defeat';
+        if (!finished && !window.confirm('当前战斗尚未结束，确定要撤退/结束战斗并返回日常待机状态吗？')) {
+            return;
+        }
+        deps.setBattleState(null);
+        deps.onStateMutated();
+        showToast('🏁 战斗已结束，已切回日常待机并同步状态');
+    });
+
     elBtnClearRoundLog.addEventListener('click', () => {
         const state = deps.getBattleState();
         if (!state) return;
@@ -399,7 +414,23 @@ export async function initHudUI(deps) {
         return list.slice(0, 4);
     }
 
-    /** 渲染 AI 剧情事件一键确认条（支持装备、道具、技能、开战、战斗中增援 5 类事件） */
+    /** 将事件附带的自定义状态与技能先入库（例如地下城新装备自带的新 Buff/技能） */
+    function registerBundledDeps(ev, config) {
+        for (const st of ev.bundledStatuses || []) {
+            if (!st?.id) continue;
+            const idx = (config.statuses || []).findIndex(x => x.id === st.id);
+            if (idx >= 0) config.statuses[idx] = { ...config.statuses[idx], ...st };
+            else config.statuses.push(st);
+        }
+        for (const sk of ev.bundledSkills || []) {
+            if (!sk?.id) continue;
+            const idx = (config.skills || []).findIndex(x => x.id === sk.id);
+            if (idx >= 0) config.skills[idx] = { ...config.skills[idx], ...sk };
+            else config.skills.push(sk);
+        }
+    }
+
+    /** 渲染 AI 剧情事件一键确认条（v2.0 支持 8 类事件 + 地下城批量掉落包 + 一键全收） */
     function renderPendingEvents() {
         const config = deps.getConfig();
         if (!pendingEvents.length) {
@@ -408,7 +439,17 @@ export async function initHudUI(deps) {
             return;
         }
         elEventBar.classList.remove('stcf-hidden');
-        elEventBar.innerHTML = pendingEvents.map(ev => {
+        const batchHeader = pendingEvents.length >= 2 ? `
+            <div class="stcf-event-item" style="border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:6px;margin-bottom:4px;">
+                <div class="stcf-event-desc">📦 共检测到 <strong>${pendingEvents.length}</strong> 条剧情联动事件</div>
+                <div class="stcf-event-actions">
+                    <button type="button" class="stcf-btn stcf-btn-primary stcf-btn-sm" data-ev-batch="accept_all_loot">✅ 一键全部收录</button>
+                    <button type="button" class="stcf-btn stcf-btn-sm" data-ev-batch="dismiss_all">✖ 全部忽略</button>
+                </div>
+            </div>
+        ` : '';
+
+        elEventBar.innerHTML = batchHeader + pendingEvents.map(ev => {
             if (ev.type === 'loot_equipment') {
                 const eq = (ev.equipId && findEquipmentById(config, ev.equipId)) || ev.equipment;
                 if (!eq) return '';
@@ -439,6 +480,31 @@ export async function initHudUI(deps) {
                     </div>
                 `;
             }
+            if (ev.type === 'loot_bundle') {
+                const parts = [];
+                for (const eEntry of ev.equips || []) {
+                    const eq = (eEntry.equipId && findEquipmentById(config, eEntry.equipId)) || eEntry.equipment;
+                    if (eq) parts.push(`🛡️${eq.name}`);
+                }
+                for (const iEntry of ev.items || []) {
+                    const libIt = iEntry.itemId ? findItemById(config, iEntry.itemId) : null;
+                    const it = libIt || iEntry.item;
+                    if (it) parts.push(`${it.icon || '🎒'}${it.name}×${iEntry.quantity || 1}`);
+                }
+                for (const sEntry of ev.grantSkills || []) {
+                    const sk = (sEntry.skillId && findSkillById(config, sEntry.skillId)) || sEntry.skill;
+                    if (sk) parts.push(`✨${sk.name}`);
+                }
+                return `
+                    <div class="stcf-event-item" data-ev-uid="${escapeHtml(ev.uid)}">
+                        <div class="stcf-event-desc">💎 <strong>【${escapeHtml(ev.title || '战利品包')}】</strong>：${escapeHtml(parts.join('、') || '附带配置数据')}</div>
+                        <div class="stcf-event-actions">
+                            <button type="button" class="stcf-btn stcf-btn-primary stcf-btn-sm" data-ev-act="accept_bundle">一键收入库</button>
+                            <button type="button" class="stcf-btn stcf-btn-sm" data-ev-act="dismiss">忽略</button>
+                        </div>
+                    </div>
+                `;
+            }
             if (ev.type === 'grant_skill') {
                 const sk = (ev.skillId && findSkillById(config, ev.skillId)) || ev.skill;
                 if (!sk) return '';
@@ -447,6 +513,31 @@ export async function initHudUI(deps) {
                         <div class="stcf-event-desc">✨ 剧情领悟技能 <strong>【${escapeHtml(sk.name)}】</strong>${sk.description ? `（${escapeHtml(sk.description)}）` : ''}</div>
                         <div class="stcf-event-actions">
                             <button type="button" class="stcf-btn stcf-btn-primary stcf-btn-sm" data-ev-act="accept_skill">学会该技能</button>
+                            <button type="button" class="stcf-btn stcf-btn-sm" data-ev-act="dismiss">忽略</button>
+                        </div>
+                    </div>
+                `;
+            }
+            if (ev.type === 'grant_status') {
+                const st = (ev.statusId && findStatusDefById(config, ev.statusId)) || ev.status;
+                if (!st) return '';
+                const verb = ev.remove ? '解除状态' : '附加状态';
+                return `
+                    <div class="stcf-event-item" data-ev-uid="${escapeHtml(ev.uid)}">
+                        <div class="stcf-event-desc">${escapeHtml(st.icon || '✨')} 剧情${verb} <strong>【${escapeHtml(st.name)}】</strong>${ev.turns ? `(${ev.turns}回合)` : ''}</div>
+                        <div class="stcf-event-actions">
+                            <button type="button" class="stcf-btn stcf-btn-primary stcf-btn-sm" data-ev-act="accept_status">确认生效</button>
+                            <button type="button" class="stcf-btn stcf-btn-sm" data-ev-act="dismiss">忽略</button>
+                        </div>
+                    </div>
+                `;
+            }
+            if (ev.type === 'level_up') {
+                return `
+                    <div class="stcf-event-item" data-ev-uid="${escapeHtml(ev.uid)}">
+                        <div class="stcf-event-desc">⬆️ <strong>${escapeHtml(ev.reason || '剧情修炼突破')}</strong>：提升 <strong>+${ev.levels || 1} 级</strong>（自动发放自由属性点）</div>
+                        <div class="stcf-event-actions">
+                            <button type="button" class="stcf-btn stcf-btn-primary stcf-btn-sm" data-ev-act="accept_level_up">确认突破</button>
                             <button type="button" class="stcf-btn stcf-btn-sm" data-ev-act="dismiss">忽略</button>
                         </div>
                     </div>
@@ -483,34 +574,13 @@ export async function initHudUI(deps) {
         }).join('');
     }
 
-    elEventBar.addEventListener('click', (e) => {
-        const actBtn = e.target.closest('[data-ev-act]');
-        if (!actBtn) return;
-        const itemEl = actBtn.closest('.stcf-event-item');
-        const uid = itemEl?.dataset.evUid;
-        const evIdx = pendingEvents.findIndex(x => x.uid === uid);
-        if (evIdx < 0) return;
-
-        const ev = pendingEvents[evIdx];
-        const act = actBtn.dataset.evAct;
-        const config = deps.getConfig();
-        const state = deps.getBattleState();
-
-        if (act === 'dismiss') {
-            pendingEvents.splice(evIdx, 1);
-            if (ev.fromMvuField) {
-                deps.onStateMutated({ clearMvuField: ev.fromMvuField });
-            } else {
-                render();
-            }
-            return;
-        }
+    function applySingleLootOrGrowthEvent(ev, act, config, state) {
+        registerBundledDeps(ev, config);
 
         if (ev.type === 'loot_equipment') {
             const libEq = ev.equipId ? findEquipmentById(config, ev.equipId) : null;
             const eq = libEq || ev.equipment;
-            if (!eq) { pendingEvents.splice(evIdx, 1); render(); return; }
-
+            if (!eq) return '';
             let finalId = eq.id;
             if (!libEq) {
                 const existIdx = (config.equipments || []).findIndex(x => x.id === eq.id || x.name === eq.name);
@@ -521,7 +591,6 @@ export async function initHudUI(deps) {
                     config.equipments.push(eq);
                 }
             }
-
             if (act === 'equip_now') {
                 const targetUnitId = ev.autoEquipTo || state?.selectedActorId || config.allies?.[0]?.id;
                 if (state && state.active && targetUnitId) {
@@ -533,40 +602,72 @@ export async function initHudUI(deps) {
                         if (!tpl.equipmentIds.includes(finalId)) tpl.equipmentIds.push(finalId);
                     }
                 }
-                showToast(`🛡️ 已收录并装备「${eq.name}」`);
-            } else {
-                showToast(`🎁 已将「${eq.name}」收入装备库`);
+                return `🛡️ 已收录并装备「${eq.name}」`;
             }
-            saveConfig(config);
-            pendingEvents.splice(evIdx, 1);
-            deps.onConfigMutated?.();
-            deps.onStateMutated();
-            return;
+            return `🎁 已将「${eq.name}」收入装备库`;
         }
 
         if (ev.type === 'loot_item') {
             const libItem = ev.itemId ? findItemById(config, ev.itemId) : null;
             if (libItem) {
                 libItem.quantity = (libItem.quantity || 0) + (ev.quantity || 1);
-                showToast(`🎒 「${libItem.name}」库存 +${ev.quantity || 1}`);
-            } else if (ev.item) {
+                return `🎒 「${libItem.name}」库存 +${ev.quantity || 1}`;
+            }
+            if (ev.item) {
                 const exist = (config.items || []).find(x => x.id === ev.item.id || x.name === ev.item.name);
                 if (exist) exist.quantity = (exist.quantity || 0) + ev.item.quantity;
                 else config.items.push(ev.item);
-                showToast(`🎒 已将「${ev.item.name} ×${ev.item.quantity}」收入背包`);
+                return `🎒 已将「${ev.item.name} ×${ev.item.quantity}」收入背包`;
             }
-            saveConfig(config);
-            pendingEvents.splice(evIdx, 1);
-            deps.onConfigMutated?.();
-            deps.onStateMutated();
-            return;
+            return '';
+        }
+
+        if (ev.type === 'loot_bundle') {
+            let cnt = 0;
+            for (const eEntry of ev.equips || []) {
+                const libEq = eEntry.equipId ? findEquipmentById(config, eEntry.equipId) : null;
+                const eq = libEq || eEntry.equipment;
+                if (!eq) continue;
+                if (!libEq) {
+                    const existIdx = (config.equipments || []).findIndex(x => x.id === eq.id || x.name === eq.name);
+                    if (existIdx >= 0) config.equipments[existIdx] = { ...config.equipments[existIdx], ...eq, id: config.equipments[existIdx].id };
+                    else config.equipments.push(eq);
+                }
+                cnt++;
+            }
+            for (const iEntry of ev.items || []) {
+                const libIt = iEntry.itemId ? findItemById(config, iEntry.itemId) : null;
+                if (libIt) {
+                    libIt.quantity = (libIt.quantity || 0) + (iEntry.quantity || 1);
+                    cnt++;
+                } else if (iEntry.item) {
+                    const exist = (config.items || []).find(x => x.id === iEntry.item.id || x.name === iEntry.item.name);
+                    if (exist) exist.quantity = (exist.quantity || 0) + (iEntry.quantity || 1);
+                    else config.items.push(iEntry.item);
+                    cnt++;
+                }
+            }
+            const targetUnitId = ev.unitId || state?.selectedActorId || config.allies?.[0]?.id;
+            for (const sEntry of ev.grantSkills || []) {
+                const libSk = sEntry.skillId ? findSkillById(config, sEntry.skillId) : null;
+                const sk = libSk || sEntry.skill;
+                if (!sk) continue;
+                let finalSkId = sk.id;
+                if (!libSk) {
+                    const existIdx = (config.skills || []).findIndex(x => x.id === sk.id || x.name === sk.name);
+                    if (existIdx >= 0) { config.skills[existIdx] = { ...config.skills[existIdx], ...sk, id: config.skills[existIdx].id }; finalSkId = config.skills[existIdx].id; }
+                    else config.skills.push(sk);
+                }
+                if (targetUnitId) grantSkillToUnit(state, config, targetUnitId, finalSkId);
+                cnt++;
+            }
+            return `💎 已全部收录「${ev.title || '战利品包'}」共 ${cnt} 项`;
         }
 
         if (ev.type === 'grant_skill') {
             const libSkill = ev.skillId ? findSkillById(config, ev.skillId) : null;
             const sk = libSkill || ev.skill;
-            if (!sk) { pendingEvents.splice(evIdx, 1); render(); return; }
-
+            if (!sk) return '';
             let finalSkillId = sk.id;
             if (!libSkill) {
                 const existIdx = (config.skills || []).findIndex(x => x.id === sk.id || x.name === sk.name);
@@ -579,26 +680,107 @@ export async function initHudUI(deps) {
             }
             const targetUnitId = ev.unitId || state?.selectedActorId || config.allies?.[0]?.id;
             grantSkillToUnit(state, config, targetUnitId, finalSkillId);
+            return `✨ 已学会技能「${sk.name}」`;
+        }
+
+        if (ev.type === 'grant_status') {
+            let finalStId = ev.statusId;
+            if (ev.status && !findStatusDefById(config, ev.status.id)) {
+                config.statuses.push(ev.status);
+                finalStId = ev.status.id;
+            }
+            const targetUnitId = ev.unitId || state?.selectedActorId || config.allies?.[0]?.id;
+            const r = applyExternalStatusToUnit(state, config, targetUnitId, finalStId, ev.turns, ev.remove);
+            return r.ok ? `✨ 已${ev.remove ? '解除' : '附加'}剧情状态` : `⚠️ ${r.message}`;
+        }
+
+        if (ev.type === 'level_up') {
+            const targetUnitId = ev.unitId || state?.selectedActorId || config.allies?.[0]?.id;
+            const r = levelUpUnit(state, config, targetUnitId, ev.levels || 1);
+            return r.ok ? `⬆️ 已突破至 Lv.${r.level}（+${r.gainedPts} 自由点）` : `⚠️ ${r.message}`;
+        }
+        return '';
+    }
+
+    elEventBar.addEventListener('click', (e) => {
+        const config = deps.getConfig();
+        const state = deps.getBattleState();
+
+        const batchBtn = e.target.closest('[data-ev-batch]');
+        if (batchBtn) {
+            const batchAct = batchBtn.dataset.evBatch;
+            if (batchAct === 'dismiss_all') {
+                pendingEvents = [];
+                render();
+                return;
+            }
+            if (batchAct === 'accept_all_loot') {
+                let doneCount = 0;
+                const remaining = [];
+                for (const ev of pendingEvents) {
+                    if (['loot_equipment', 'loot_item', 'loot_bundle', 'grant_skill', 'grant_status', 'level_up'].includes(ev.type)) {
+                        applySingleLootOrGrowthEvent(ev, 'store_only', config, state);
+                        doneCount++;
+                    } else {
+                        remaining.push(ev);
+                    }
+                }
+                pendingEvents = remaining;
+                saveConfig(config);
+                deps.onConfigMutated?.();
+                deps.onStateMutated();
+                showToast(`✅ 已一键收录 ${doneCount} 项战利品/成长事件！`);
+                return;
+            }
+        }
+
+        const actBtn = e.target.closest('[data-ev-act]');
+        if (!actBtn) return;
+        const itemEl = actBtn.closest('.stcf-event-item');
+        const uid = itemEl?.dataset.evUid;
+        const evIdx = pendingEvents.findIndex(x => x.uid === uid);
+        if (evIdx < 0) return;
+
+        const ev = pendingEvents[evIdx];
+        const act = actBtn.dataset.evAct;
+
+        if (act === 'dismiss') {
+            pendingEvents.splice(evIdx, 1);
+            if (ev.fromMvuField) {
+                deps.onStateMutated({ clearMvuField: ev.fromMvuField });
+            } else {
+                render();
+            }
+            return;
+        }
+
+        if (['loot_equipment', 'loot_item', 'loot_bundle', 'grant_skill', 'grant_status', 'level_up'].includes(ev.type)) {
+            const msg = applySingleLootOrGrowthEvent(ev, act, config, state);
             saveConfig(config);
             pendingEvents.splice(evIdx, 1);
             deps.onConfigMutated?.();
             deps.onStateMutated();
-            showToast(`✨ 已学会技能「${sk.name}」`);
+            if (msg) showToast(msg);
             return;
         }
 
         if (ev.type === 'start_combat') {
+            registerBundledDeps(ev, config);
+            saveConfig(config);
             const resolved = resolveEventEnemies(ev, config);
             const nextState = createBattleState(config, resolved.length ? resolved : null);
             applyMvuVitalsOnBattleStart(nextState, config);
             deps.setBattleState(nextState);
             pendingEvents.splice(evIdx, 1);
+            deps.onConfigMutated?.();
             deps.onStateMutated({ clearMvuField: ev.fromMvuField || '' });
             showToast('⚔️ 已按剧情敌人开启战斗！');
             return;
         }
 
         if (ev.type === 'add_enemy') {
+            registerBundledDeps(ev, config);
+            saveConfig(config);
             const resolved = resolveEventEnemies(ev, config);
             if (!state || !state.active) {
                 const nextState = createBattleState(config, resolved.length ? resolved : null);
@@ -615,6 +797,7 @@ export async function initHudUI(deps) {
                 if (addedCount > 0) showToast(`🚨 已向当前战场塞入 ${addedCount} 名敌方增援！`);
             }
             pendingEvents.splice(evIdx, 1);
+            deps.onConfigMutated?.();
             deps.onStateMutated({ clearMvuField: ev.fromMvuField || '' });
         }
     });
@@ -824,7 +1007,13 @@ export async function initHudUI(deps) {
             })() : '';
 
             const availSkills = actor ? getUnitAvailableSkills(actor, config) : [];
-            if (availSkills.length === 0 && !struggleBtnHtml) {
+            const defendBtnHtml = (!strugglePreview && actor && actor.side === 'ally') ? `
+                <button type="button" class="stcf-skill-btn" data-action="defend_wait" ${!canAct ? 'disabled' : ''} title="跳过本角色攻击，防御待机并调息回复少量 MP（防止缺蓝/全冷却卡死）">
+                    <span class="stcf-skill-name">🛡️ 防御待机</span>
+                    <span class="stcf-skill-meta">0MP · 调息回蓝</span>
+                </button>
+            ` : '';
+            if (availSkills.length === 0 && !struggleBtnHtml && !defendBtnHtml) {
                 elSkillsBar.innerHTML = '<span class="stcf-muted">该角色尚未配置技能，请到「成长/职业」或扩展设置中添加。</span>';
             } else {
                 elSkillsBar.innerHTML = struggleBtnHtml + availSkills.map(({ skill: sk, fromEquipmentName, fromClassName }) => {
@@ -842,7 +1031,7 @@ export async function initHudUI(deps) {
                             <span class="stcf-skill-meta">${typeBadge}${sk.mpCost > 0 ? ` · ${sk.mpCost}MP` : ''}${escapeHtml(srcTag)}${lockTag}</span>
                         </button>
                     `;
-                }).join('');
+                }).join('') + defendBtnHtml;
             }
 
             // 2. 道具栏
@@ -970,6 +1159,12 @@ export async function initHudUI(deps) {
             }
 
             elBtnEndTurn.disabled = state.phase !== 'player_turn';
+            if (elBtnFinishBattle) {
+                const ended = state.phase === 'victory' || state.phase === 'defeat';
+                elBtnFinishBattle.classList.toggle('stcf-btn-primary', ended);
+                elBtnFinishBattle.classList.toggle('stcf-btn-secondary', !ended);
+                elBtnFinishBattle.textContent = ended ? '🏁 结束战斗(返回日常)' : '🏁 结束/撤退';
+            }
 
             const recentLogs = (state.allLogs || []).slice(-25);
             elLogList.innerHTML = recentLogs.length
@@ -1033,6 +1228,13 @@ export async function initHudUI(deps) {
         const state = deps.getBattleState();
         if (btn.dataset.action === 'struggle') {
             const res = executeStruggleAction(state, deps.getConfig(), state.selectedActorId);
+            if (!res.ok) { showToast(`⚠️ ${res.message}`); return; }
+            deps.onStateMutated();
+            await dispatchNewLogs(res.newLogs);
+            return;
+        }
+        if (btn.dataset.action === 'defend_wait') {
+            const res = executeDefendWaitAction(state, deps.getConfig(), state.selectedActorId);
             if (!res.ok) { showToast(`⚠️ ${res.message}`); return; }
             deps.onStateMutated();
             await dispatchNewLogs(res.newLogs);

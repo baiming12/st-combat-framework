@@ -10,8 +10,8 @@
                 "技能"
             ],
             "keysecondary": [],
-            "comment": "【游玩用】TRPG 回合制战斗结算遵守规则（兼容 MVU Zod）",
-            "content": "[TRPG 战斗联动规则]\n1. 遇敌停手：当剧情进入正式战斗或遭遇敌对目标时，只描写双方对峙、环境氛围与敌人特征，严禁擅自代替玩家结算伤害数值、血量变化或直接宣判胜负，等待玩家发送【第 X 回合战斗记录】。\n2. 严守战报：当玩家发送【第 X 回合战斗记录】时，必须严格按照战报中记录的技能、道具、装备更换、伤害数字、剩余血量、特殊状态与倒下结果来描写生动的战斗画面，不得私自篡改战果。\n3. 优先响应系统事件：若上下文出现 [系统战斗事件] 提示，必须在本次回复中重点描写该阈值爆发/异常状态引发的剧情转折。\n4. 兼容 MVU / MVU Zod：若本角色卡启用了 MVU Zod 变量更新块，请在正常更新本卡变量时直接以玩家发来的战斗记录为准。",
+            "comment": "【游玩用】TRPG 回合制战斗结算遵守规则（v2.0 兼容 MVU Zod）",
+            "content": "[TRPG 战斗联动规则]\n1. 遇敌停手：当剧情进入正式战斗或遭遇敌对目标时，只描写双方对峙、环境氛围与敌人特征，严禁擅自代替玩家结算伤害数值、血量变化或直接宣判胜负，等待玩家发送【第 X 回合战斗记录】。\n2. 严守战报：当玩家发送【第 X 回合战斗记录】时，必须严格按照战报中记录的技能、复合效果、暴击/闪避、束缚与挣扎、打破禁锢道具、道具使用、装备更换、伤害数字与倒下结果来描写生动的战斗画面，不得私自篡改战果。\n3. 优先响应系统事件：若上下文出现 [系统战斗事件] 提示，必须在本次回复中重点描写该阈值爆发/异常状态引发的剧情转折。\n4. 兼容 MVU / MVU Zod：若本角色卡启用了 MVU Zod 变量更新块，战斗结算由插件自动写回 `stat_data.combat`，AI 只需按战报描写画面并照常维护非战斗变量即可。",
             "constant": true,
             "vectorized": false,
             "selective": true,
@@ -46,12 +46,14 @@
                 "装备",
                 "道具",
                 "掉落",
+                "宝箱",
                 "遭遇",
-                "开战"
+                "开战",
+                "突破"
             ],
             "keysecondary": [],
-            "comment": "【游玩用】MVU Zod 联动规则与备用 <combat_event> 标签协议 (v1.4)",
-            "content": "[战斗插件联动协议]\n上下文中会提供 [TRPG 可调用图鉴目录]，列出已配置好的敌人、技能、装备、道具 ID 与简述。\n\n【优先模式：本角色卡已使用 MVU Zod 且包含 stat_data.combat】\n严禁额外输出 <combat_event> 标签，直接通过本卡正常的 MVU Zod 变量更新来操作：\n1. 剧情中获得/更换装备：将对应装备 ID 加入 `combat.allies.<角色ID>.equipmentIds`；\n2. 剧情中学会新技能：将对应技能 ID 加入 `combat.allies.<角色ID>.skillIds`；\n3. 剧情中获得或消耗道具：增减 `combat.items.<道具ID>` 数量；\n4. 剧情中角色陷入异常或获得祝福（如踩陷阱中毒、神殿祈福）：向 `combat.allies.<角色ID>.statuses` 增删 `{ \"id\": \"状态ID\", \"name\": \"状态名\", \"turns\": 3, \"source\": \"normal\" }`；\n5. 剧情修炼突破或转职：提升 `combat.allies.<角色ID>.level`（插件会自动补发自由属性点并解锁职业新技能）或修改 `classId`；\n6. 剧情遭遇敌人需要开战：将图鉴敌人 ID（最多4个）写入 `combat.encounter_enemy_ids`（例如 `[\"enemy_01\",\"enemy_02\"]`）；\n6. 战斗中途敌方增援：将增援敌人 ID 写入 `combat.reinforce_enemy_ids`；\n7. 战斗结算由玩家通过 HUD 完成并自动写回 `combat`，AI 只需按战报描写画面，无需重算血量、状态与道具扣减。\n\n【备用模式：仅当本卡未启用 MVU Zod 时使用 <combat_event>】\n在回复末尾附带单行 <combat_event>JSON</combat_event>（日常无事件勿输出）：\n- 开战：<combat_event>{\"type\":\"start_combat\",\"enemyIds\":[\"enemy_01\"]}</combat_event>\n- 战中增援：<combat_event>{\"type\":\"add_enemy\",\"enemyId\":\"enemy_02\"}</combat_event>\n- 领悟技能：<combat_event>{\"type\":\"grant_skill\",\"unitId\":\"ally_01\",\"skillId\":\"skill_03\"}</combat_event>\n- 获得装备：<combat_event>{\"type\":\"loot_equipment\",\"equipId\":\"equip_02\",\"autoEquipTo\":\"ally_01\"}</combat_event>\n- 获得道具：<combat_event>{\"type\":\"loot_item\",\"itemId\":\"item_01\",\"quantity\":2}</combat_event>",
+            "comment": "【游玩用】MVU Zod 联动与动态战利品 <combat_event> 协议 (v2.0)",
+            "content": "[战斗插件联动协议 v2.0]\n上下文中会提供 [TRPG 可调用图鉴目录]，列出已配置好的敌人、技能、装备、道具、状态 ID 与简述。\n\n【通道 A：本卡启用 MVU Zod 且操作「图鉴里已有的 ID」时】\n直接通过本卡正常的 MVU Zod 变量更新操作，无需重复发标签：\n1. 装备/技能：增删 `combat.allies.<角色ID>.equipmentIds` 或 `skillIds`；\n2. 道具库存：增减 `combat.items.<道具ID>` 数量；\n3. 日常异常/祝福状态：增删 `combat.allies.<角色ID>.statuses`（`{ \"id\", \"name\", \"turns\", \"source\": \"normal\" }`）；\n4. 修炼突破/转职：提升 `combat.allies.<角色ID>.level`（插件自动补发自由属性点）或修改 `classId`；\n5. 遇敌开战/战中增援：写入 `combat.encounter_enemy_ids` 或 `combat.reinforce_enemy_ids`（最多4个已有敌人 ID）。\n\n【通道 B：未启用 MVU Zod，或在地下城/剧情中「动态自创新装备/新道具/宝箱多件掉落/新敌人」时】\n在回复最末尾附带单行合法 JSON 的 `<combat_event>...</combat_event>`（日常无事件勿输出；插件确认收录后会自动写入插件库并同步写回 MVU Zod！）：\n- 单个预设/动态装备（可附带 `statuses`/`skills` 自动入库）：\n  `<combat_event>{\"type\":\"loot_equipment\",\"equipId\":\"equip_02\",\"autoEquipTo\":\"ally_01\"}</combat_event>`\n  `<combat_event>{\"type\":\"loot_equipment\",\"data\":{\"id\":\"dg_eq_01\",\"name\":\"霜纹短剑\",\"slot\":\"weapon\",\"description\":\"寒冰附魔短剑\",\"bonusAtk\":10,\"bonusSpi\":4}}</combat_event>`\n- 单个预设/动态道具：\n  `<combat_event>{\"type\":\"loot_item\",\"itemId\":\"item_01\",\"quantity\":2}</combat_event>`\n  `<combat_event>{\"type\":\"loot_item\",\"data\":{\"id\":\"dg_it_01\",\"name\":\"秘药\",\"icon\":\"🧪\",\"description\":\"回复60HP\",\"quantity\":2,\"targetType\":\"single_ally\",\"effectType\":\"heal\",\"formula\":\"60\",\"consumesTurn\":true}}</combat_event>`\n- 地下城宝箱/Boss 批量战利品包（一次同时掉多件装备+道具+技能+配套状态）：\n  `<combat_event>{\"type\":\"loot_bundle\",\"title\":\"宝箱战利品\",\"equipments\":[...],\"items\":[...],\"grantSkills\":[...],\"statuses\":[...]}</combat_event>`\n- 领悟技能：`<combat_event>{\"type\":\"grant_skill\",\"unitId\":\"ally_01\",\"skillId\":\"skill_03\"}</combat_event>`\n- 剧情状态变化：`<combat_event>{\"type\":\"grant_status\",\"unitId\":\"ally_01\",\"statusId\":\"debuff_01\",\"turns\":3}</combat_event>`（加 `\"remove\":true` 为解除）\n- 剧情修炼突破：`<combat_event>{\"type\":\"level_up\",\"unitId\":\"ally_01\",\"levels\":1,\"reason\":\"顿悟突破\"}</combat_event>`\n- 开战/增援（支持已有 `enemyIds` 或临时 `enemies` 含 `spi/mdef/level`）：\n  `<combat_event>{\"type\":\"start_combat\",\"enemyIds\":[\"enemy_01\"]}</combat_event>`\n  `<combat_event>{\"type\":\"add_enemy\",\"enemyId\":\"enemy_02\"}</combat_event>`",
             "constant": true,
             "vectorized": false,
             "selective": true,

@@ -223,6 +223,7 @@ export async function initSettingsUI(deps) {
         for (const sk of cfg.skills || []) {
             renameGaugeKeyInMap(sk.selfGaugeChanges, oldId, newId);
             renameGaugeKeyInMap(sk.targetGaugeChanges, oldId, newId);
+            if (sk.requiredGaugeId === oldId) sk.requiredGaugeId = newId;
             for (const ef of sk.extraEffects || []) {
                 renameGaugeKeyInMap(ef?.gaugeChanges, oldId, newId);
             }
@@ -891,11 +892,14 @@ export async function initSettingsUI(deps) {
     const elSkillsEditor = container.querySelector('#stcf-skills-editor');
     const elFilterSkillWv = container.querySelector('#stcf-filter-skill-wv');
     const elFilterSkillPool = container.querySelector('#stcf-filter-skill-pool');
+    const elSearchSkill = container.querySelector('#stcf-search-skill');
     let skillFilterWv = 'all';
     let skillFilterPool = 'all';
+    let skillSearchKw = '';
 
     elFilterSkillWv.addEventListener('change', () => { skillFilterWv = elFilterSkillWv.value || 'all'; renderSkillsList(false); });
     elFilterSkillPool.addEventListener('change', () => { skillFilterPool = elFilterSkillPool.value || 'all'; renderSkillsList(false); });
+    elSearchSkill?.addEventListener('input', () => { skillSearchKw = (elSearchSkill.value || '').trim().toLowerCase(); renderSkillsList(false); });
 
     container.querySelector('#stcf-btn-add-skill').addEventListener('click', () => {
         const cfg = deps.getConfig();
@@ -922,6 +926,11 @@ export async function initSettingsUI(deps) {
             applyStatuses: [],
             requiredTargetStatusIds: [],
             requiredSelfStatusIds: [],
+            requiredGaugeId: '',
+            requiredGaugeMin: 0,
+            hitRate: 100,
+            critRate: 0,
+            critMultiplier: 1.5,
             aiPriority: 10,
             aiHpBelowPercent: 100,
         });
@@ -944,6 +953,10 @@ export async function initSettingsUI(deps) {
             .filter(({ sk }) => {
                 if (skillFilterWv !== 'all' && (sk.worldview || '通用') !== skillFilterWv) return false;
                 if (skillFilterPool !== 'all' && (sk.poolType || 'universal') !== skillFilterPool) return false;
+                if (skillSearchKw) {
+                    const hay = `${sk.name || ''} ${sk.id || ''} ${sk.description || ''}`.toLowerCase();
+                    if (!hay.includes(skillSearchKw)) return false;
+                }
                 return true;
             });
 
@@ -1021,6 +1034,7 @@ export async function initSettingsUI(deps) {
                         </span>
                         <span class="stcf-fold-right">
                             <span class="stcf-id-tag">${escapeHtml(sk.id)}</span>
+                            <button type="button" class="stcf-del-btn" data-action="duplicate" title="复制一个相同技能方便微调">📋</button>
                             <button type="button" class="stcf-del-btn" data-action="delete" title="删除技能">🗑️</button>
                         </span>
                     </summary>
@@ -1077,6 +1091,11 @@ export async function initSettingsUI(deps) {
                                 return `<label class="stcf-mini-field"><span>目标${escapeHtml(g.name)}</span><input type="number" class="text_pole" data-skill-target-gauge="${escapeHtml(g.id)}" value="${tv ?? 0}"></label>`;
                             }).join('')}
                         </div>
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>命中率 (%)</span><input type="number" min="1" max="100" class="text_pole" data-field="hitRate" value="${sk.hitRate ?? 100}"></label>
+                            <label class="stcf-mini-field"><span>暴击率 (%)</span><input type="number" min="0" max="100" class="text_pole" data-field="critRate" value="${sk.critRate ?? 0}"></label>
+                            <label class="stcf-mini-field"><span>暴击倍率</span><input type="number" step="0.1" min="1" class="text_pole" data-field="critMultiplier" value="${sk.critMultiplier ?? 1.5}"></label>
+                        </div>
                         <div class="stcf-grid-2">
                             <label class="stcf-mini-field"><span>AI 优先级（越大越优先）</span><input type="number" min="1" class="text_pole" data-field="aiPriority" value="${sk.aiPriority ?? 10}"></label>
                             <label class="stcf-mini-field"><span>AI 仅在 HP ≤ (%) 释放</span><input type="number" min="1" max="100" class="text_pole" data-field="aiHpBelowPercent" value="${sk.aiHpBelowPercent ?? 100}"></label>
@@ -1101,10 +1120,21 @@ export async function initSettingsUI(deps) {
                             </div>
                         </details>
 
-                        <!-- 折叠子区：目标与自身前置状态 -->
+                        <!-- 折叠子区：目标与自身前置状态 / 状态槽门槛 -->
                         <details class="stcf-sub-fold">
-                            <summary>🔒 释放前置状态条件（目标已选 ${reqTgtCount} 项 ｜ 自身已选 ${reqSelfCount} 项）</summary>
+                            <summary>🔒 释放前置条件（目标状态 ${reqTgtCount} ｜ 自身状态 ${reqSelfCount}${sk.requiredGaugeId ? ` ｜ 槽门槛` : ''}）</summary>
                             <div class="stcf-sub-body">
+                                <div class="stcf-grid-2" style="margin-bottom:8px;">
+                                    <label class="stcf-mini-field"><span>前置状态槽门槛（可选）</span>
+                                        <select class="text_pole" data-field="requiredGaugeId">
+                                            <option value="" ${!sk.requiredGaugeId ? 'selected' : ''}>不限状态槽</option>
+                                            ${gaugeEntries.map(g => `<option value="${escapeHtml(g.id)}" ${sk.requiredGaugeId === g.id ? 'selected' : ''}>需 ${escapeHtml(g.name)} (${escapeHtml(g.id)}) ≥</option>`).join('')}
+                                        </select>
+                                    </label>
+                                    <label class="stcf-mini-field"><span>所需最低槽位数值</span>
+                                        <input type="number" class="text_pole" data-field="requiredGaugeMin" value="${sk.requiredGaugeMin ?? 0}">
+                                    </label>
+                                </div>
                                 <div class="stcf-sub-label">目标持有以下<strong>任意 1 个</strong>状态才可释放（全不勾不限）：</div>
                                 <div class="stcf-chips-wrap" style="margin-bottom:8px;">${renderStatusCheckChips(cfg, sk.requiredTargetStatusIds, 'data-skill-req-target')}</div>
                                 <div class="stcf-sub-label">自身持有以下<strong>任意 1 个</strong>状态才可释放（如狂暴/魔力涌动，全不勾不限）：</div>
@@ -1225,6 +1255,14 @@ export async function initSettingsUI(deps) {
             e.preventDefault();
             deps.getConfig().skills.splice(idx, 1);
             commitChange(true);
+        } else if (e.target.closest('[data-action="duplicate"]')) {
+            e.preventDefault();
+            const cfg = deps.getConfig();
+            const clone = JSON.parse(JSON.stringify(skill));
+            clone.id = makeUniqueId('skill', cfg.skills);
+            clone.name = `${skill.name}(副本)`;
+            cfg.skills.splice(idx + 1, 0, clone);
+            commitChange(true, `sk:${clone.id}`);
         } else if (e.target.closest('[data-extra-action="add"]')) {
             if (!Array.isArray(skill.extraEffects)) skill.extraEffects = [];
             skill.extraEffects.push({
@@ -1297,6 +1335,7 @@ export async function initSettingsUI(deps) {
                         </span>
                         <span class="stcf-fold-right">
                             <span class="stcf-id-tag">${escapeHtml(eq.id)}</span>
+                            <button type="button" class="stcf-del-btn" data-action="duplicate" title="复制装备">📋</button>
                             <button type="button" class="stcf-del-btn" data-action="delete" title="删除装备">🗑️</button>
                         </span>
                     </summary>
@@ -1408,6 +1447,7 @@ export async function initSettingsUI(deps) {
                         </span>
                         <span class="stcf-fold-right">
                             <span class="stcf-id-tag">${escapeHtml(it.id)}</span>
+                            <button type="button" class="stcf-del-btn" data-action="duplicate" title="复制道具">📋</button>
                             <button type="button" class="stcf-del-btn" data-action="delete" title="删除道具">🗑️</button>
                         </span>
                     </summary>
@@ -1526,7 +1566,7 @@ export async function initSettingsUI(deps) {
             skipTurn: false,
             perTurnHp: -10, perTurnMp: 0, perTurnGaugeA: 0, perTurnGaugeB: 0, perTurnGauges: {},
             gaugeChangeMultipliers: [],
-            atkMultiplier: 1, spiMultiplier: 1, defMultiplier: 1, mdefMultiplier: 1,
+            atkMultiplier: 1, spiMultiplier: 1, defMultiplier: 1, mdefMultiplier: 1, damageTakenMultiplier: 1,
             duration: 2,
             onExpireStatusIds: [],
             restraintType: '',
@@ -1581,6 +1621,7 @@ export async function initSettingsUI(deps) {
                         </span>
                         <span class="stcf-fold-right">
                             <span class="stcf-id-tag">${escapeHtml(st.id)}</span>
+                            <button type="button" class="stcf-del-btn" data-action="duplicate" title="复制状态">📋</button>
                             <button type="button" class="stcf-del-btn" data-action="delete" title="删除状态">🗑️</button>
                         </span>
                     </summary>
@@ -1609,6 +1650,7 @@ export async function initSettingsUI(deps) {
                             <label class="stcf-mini-field"><span>精神倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="spiMultiplier" value="${st.spiMultiplier ?? 1}"></label>
                             <label class="stcf-mini-field"><span>物防倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="defMultiplier" value="${st.defMultiplier}"></label>
                             <label class="stcf-mini-field"><span>法抗倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="mdefMultiplier" value="${st.mdefMultiplier ?? 1}"></label>
+                            <label class="stcf-mini-field"><span>承伤倍率(0.7减伤/1.3易伤)</span><input type="number" step="0.1" min="0" class="text_pole" data-field="damageTakenMultiplier" value="${st.damageTakenMultiplier ?? 1}"></label>
                             <label class="stcf-mini-field"><span>持续回合数</span><input type="number" min="1" class="text_pole" data-field="duration" value="${st.duration}"></label>
                         </div>
                         <details class="stcf-sub-fold">
@@ -1905,6 +1947,22 @@ export async function initSettingsUI(deps) {
             commitChange(reRenderFields.includes(field));
         });
         hostEl.addEventListener('click', (e) => {
+            const dupBtn = e.target.closest('[data-action="duplicate"]');
+            if (dupBtn) {
+                e.preventDefault();
+                const card = dupBtn.closest('.stcf-item-card');
+                const list = getListFn();
+                const idx = Number(card.dataset.index);
+                const orig = list[idx];
+                if (!orig) return;
+                const clone = JSON.parse(JSON.stringify(orig));
+                const prefix = (orig.id || 'item').split('_')[0] || 'copy';
+                clone.id = makeUniqueId(prefix, list);
+                clone.name = `${orig.name}(副本)`;
+                list.splice(idx + 1, 0, clone);
+                commitChange(true);
+                return;
+            }
             const delBtn = e.target.closest('[data-action="delete"]');
             if (!delBtn) return;
             e.preventDefault();

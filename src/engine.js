@@ -461,6 +461,7 @@ export function getEffectiveStats(unit, config) {
     let spiMultiplier = 1;
     let defMultiplier = 1;
     let mdefMultiplier = 1;
+    let damageTakenMultiplier = 1;
     let isStunned = false;
 
     for (const activeSt of unit.statuses || []) {
@@ -473,6 +474,9 @@ export function getEffectiveStats(unit, config) {
         if (Number.isFinite(def.spiMultiplier) && def.spiMultiplier > 0 && def.spiMultiplier !== 1) spiMultiplier *= def.spiMultiplier;
         if (Number.isFinite(def.defMultiplier) && def.defMultiplier > 0 && def.defMultiplier !== 1) defMultiplier *= def.defMultiplier;
         if (Number.isFinite(def.mdefMultiplier) && def.mdefMultiplier > 0 && def.mdefMultiplier !== 1) mdefMultiplier *= def.mdefMultiplier;
+        if (Number.isFinite(def.damageTakenMultiplier) && def.damageTakenMultiplier >= 0 && def.damageTakenMultiplier !== 1) {
+            damageTakenMultiplier *= def.damageTakenMultiplier;
+        }
     }
 
     const totalBaseAtk = Math.max(0, (unit.baseAtk || 0) + eqBonus.bonusAtk + progBonus.bonusAtk);
@@ -489,6 +493,7 @@ export function getEffectiveStats(unit, config) {
         spiMultiplier: Number(spiMultiplier.toFixed(2)),
         defMultiplier: Number(defMultiplier.toFixed(2)),
         mdefMultiplier: Number(mdefMultiplier.toFixed(2)),
+        damageTakenMultiplier: Number(damageTakenMultiplier.toFixed(2)),
         isStunned,
     };
 }
@@ -1222,6 +1227,17 @@ export function checkSkillPrerequisite(state, config, actor, skill, targetId) {
         return { ok: false, reason: `冷却中（剩余 ${cd} 回合）` };
     }
 
+    // v2.0：状态槽前置门槛（例如需要 圣印 >= 3 才能释放大招）
+    if (skill?.requiredGaugeId) {
+        const reqGDef = config?.gauges?.[skill.requiredGaugeId];
+        const curGVal = actor?.gauges?.[skill.requiredGaugeId] ?? (reqGDef?.min ?? 0);
+        const minNeed = Number(skill.requiredGaugeMin) || 0;
+        if (curGVal < minNeed) {
+            const gLabel = reqGDef?.name || skill.requiredGaugeId;
+            return { ok: false, reason: `需要「${gLabel}」达到 ${minNeed}（当前 ${curGVal}）` };
+        }
+    }
+
     const reqSelfIds = Array.isArray(skill?.requiredSelfStatusIds)
         ? skill.requiredSelfStatusIds.filter(Boolean)
         : [];
@@ -1364,21 +1380,41 @@ function performSkill(state, config, actor, skill, targetId) {
     let mainTotalAmount = 0;
 
     for (const target of targets) {
+        const hitRate = clamp(skill.hitRate ?? 100, 1, 100);
+        if (hitRate < 100 && Math.random() * 100 > hitRate) {
+            targetSummaries.push(`对 ${target.name} 未命中（闪避）`);
+            continue;
+        }
+
         const vars = buildFormulaVars(actor, target, config);
-        const amount = Math.max(0, evaluateFormula(skill.formula, vars));
-        mainTotalAmount += amount;
+        let amount = Math.max(0, evaluateFormula(skill.formula, vars));
         const notes = [];
 
         if (skill.effectType === 'damage') {
+            let isCrit = false;
+            const critRate = clamp(skill.critRate ?? 0, 0, 100);
+            if (critRate > 0 && Math.random() * 100 < critRate) {
+                isCrit = true;
+                amount = Math.max(1, Math.round(amount * (Number(skill.critMultiplier) || 1.5)));
+            }
+            const targetEff = getEffectiveStats(target, config);
+            if (targetEff.damageTakenMultiplier !== 1) {
+                amount = Math.max(0, Math.round(amount * targetEff.damageTakenMultiplier));
+            }
+            mainTotalAmount += amount;
             target.hp = Math.max(0, target.hp - amount);
             if (target.side !== actor.side) attackedTargetIds.push(target.id);
-            notes.push(`造成 ${amount} 点伤害（剩余 HP ${target.hp}/${target.maxHp}）`);
+            const critTag = isCrit ? '💥暴击！' : '';
+            const vulnTag = targetEff.damageTakenMultiplier !== 1 ? `[承伤×${targetEff.damageTakenMultiplier}]` : '';
+            notes.push(`${critTag}造成 ${amount} 点伤害${vulnTag}（剩余 HP ${target.hp}/${target.maxHp}）`);
             if (target.hp <= 0) notes.push('倒下');
         } else if (skill.effectType === 'heal') {
+            mainTotalAmount += amount;
             const before = target.hp;
             target.hp = Math.min(target.maxHp, target.hp + amount);
             notes.push(`回复 ${target.hp - before} 点 HP（当前 HP ${target.hp}/${target.maxHp}）`);
         } else if (skill.effectType === 'mp_restore') {
+            mainTotalAmount += amount;
             const before = target.mp;
             target.mp = Math.min(target.maxMp, target.mp + amount);
             notes.push(`回复 ${target.mp - before} 点 MP/体力（当前 ${target.mp}/${target.maxMp}）`);
@@ -1410,9 +1446,13 @@ function performSkill(state, config, actor, skill, targetId) {
             const efNotes = [];
 
             if (ef.effectType === 'damage') {
-                et.hp = Math.max(0, et.hp - efAmount);
+                const etEff = getEffectiveStats(et, config);
+                const finalEfDmg = etEff.damageTakenMultiplier !== 1
+                    ? Math.max(0, Math.round(efAmount * etEff.damageTakenMultiplier))
+                    : efAmount;
+                et.hp = Math.max(0, et.hp - finalEfDmg);
                 if (et.side !== actor.side) attackedTargetIds.push(et.id);
-                efNotes.push(`造成 ${efAmount} 点伤害（剩余 HP ${et.hp}/${et.maxHp}）`);
+                efNotes.push(`造成 ${finalEfDmg} 点伤害（剩余 HP ${et.hp}/${et.maxHp}）`);
                 if (et.hp <= 0) efNotes.push('倒下');
             } else if (ef.effectType === 'heal') {
                 const before = et.hp;
@@ -1560,6 +1600,11 @@ export function pickAiSkillAndTarget(state, config, actor) {
     const pickTargetForSkill = (sk) => {
         if (sk.effectType === 'struggle') return null;
         if (getSkillRemainingCooldown(actor, sk.id) > 0) return null;
+        if (sk.requiredGaugeId) {
+            const reqGDef = config?.gauges?.[sk.requiredGaugeId];
+            const curGVal = actor?.gauges?.[sk.requiredGaugeId] ?? (reqGDef?.min ?? 0);
+            if (curGVal < (Number(sk.requiredGaugeMin) || 0)) return null;
+        }
         const reqSelfIds = Array.isArray(sk.requiredSelfStatusIds) ? sk.requiredSelfStatusIds.filter(Boolean) : [];
         if (reqSelfIds.length > 0) {
             const selfSet = new Set(reqSelfIds);
@@ -1659,6 +1704,83 @@ function runAutoAlliesTurn(state, config) {
         performSkill(state, config, ally, chosenPair.skill, chosenPair.targetId);
         if (checkBattleOutcome(state)) return;
     }
+}
+
+/**
+ * 玩家通用「🛡️ 防御待机」动作（防止 0 MP / 全冷却时卡死；回复少量 MP 并结束该角色本回合行动）
+ */
+export function executeDefendWaitAction(state, config, actorId) {
+    if (!state || !state.active) return { ok: false, message: '请先开始战斗。', newLogs: [] };
+    if (state.phase !== 'player_turn') return { ok: false, message: '当前不是我方行动阶段。', newLogs: [] };
+
+    const actor = state.allies.find(u => u.id === actorId);
+    if (!actor || !isAlive(actor)) return { ok: false, message: '请先选择一名存活的我方角色。', newLogs: [] };
+    if (actor.hasActed) return { ok: false, message: `${actor.name} 本回合已经行动过了。`, newLogs: [] };
+    if (isUnitRestrained(actor, config)) {
+        return { ok: false, message: `${actor.name} 当前处于束缚状态，请点击「⛓️ 挣扎脱离」。`, newLogs: [] };
+    }
+
+    const logStartIndex = state.currentRoundLogs.length;
+    actor.hasActed = true;
+    let mpNote = '';
+    if (actor.maxMp > 0 && actor.mp < actor.maxMp) {
+        const gain = Math.max(5, Math.round(actor.maxMp * 0.1));
+        const before = actor.mp;
+        actor.mp = Math.min(actor.maxMp, actor.mp + gain);
+        mpNote = `，调息回复 ${actor.mp - before} 点 MP（当前 ${actor.mp}/${actor.maxMp}）`;
+    }
+    appendBattleLog(state, `🛡️ ${actor.name} 选择防御待机${mpNote}。`);
+
+    const hasRemainingManual = state.allies.some(u => isAlive(u) && !u.hasActed && !u.autoControl);
+    if (!hasRemainingManual) {
+        runAutoAlliesTurn(state, config);
+        if (checkBattleOutcome(state)) {
+            syncDefaultSelections(state);
+            return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+        }
+    }
+    const hasRemainingActor = state.allies.some(u => isAlive(u) && !u.hasActed);
+    if (!hasRemainingActor && config.general?.autoEndPlayerTurn !== false) {
+        runEnemyTurnAndRoundEnd(state, config);
+    } else {
+        syncDefaultSelections(state);
+    }
+    return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+}
+
+/**
+ * 外部/剧情直接给指定角色附加或移除临时状态（供 <combat_event> grant_status 使用）
+ */
+export function applyExternalStatusToUnit(state, config, unitId, statusId, turnsOverride = null, remove = false) {
+    const def = findStatusDefById(config, statusId);
+    if (!def) return { ok: false, message: `未在状态库找到 ${statusId}` };
+    const live = state?.active ? findUnitById(state, unitId) : null;
+    if (!live) return { ok: false, message: '当前未在战斗中（状态仅在战斗中生效，或通过 MVU 带入）。' };
+
+    if (remove) {
+        const beforeLen = (live.statuses || []).length;
+        live.statuses = (live.statuses || []).filter(s => !(s.statusId === def.id && (!s.source || s.source === 'normal')));
+        if (live.statuses.length < beforeLen) {
+            appendBattleLog(state, `✨ 剧情事件：${live.name} 身上的「${def.name}」已解除。`);
+        }
+        return { ok: true };
+    }
+
+    const dur = Math.max(1, Math.round(Number(turnsOverride ?? def.duration) || def.duration));
+    const existing = (live.statuses || []).find(s => s.statusId === def.id && (!s.source || s.source === 'normal'));
+    if (existing) {
+        existing.remainingTurns = Math.max(existing.remainingTurns, dur);
+    } else {
+        const entry = { statusId: def.id, remainingTurns: dur, source: 'normal' };
+        if (def.restraintType && def.restraintSourceMode === 'object') {
+            const objHp = Math.max(1, Math.round(Number(def.restraintObjectHp ?? 50) || 50));
+            entry.objectHp = objHp;
+            entry.objectMaxHp = objHp;
+        }
+        live.statuses.push(entry);
+    }
+    appendBattleLog(state, `✨ 剧情事件：${live.name} 获得状态「${def.name}」(${dur}回合)。`);
+    return { ok: true };
 }
 
 /**

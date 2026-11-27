@@ -208,7 +208,7 @@ async function bootstrap() {
             },
         };
 
-        console.log('[CombatFramework] TRPG 通用回合制战斗框架 v1.4 (MVU Zod 联动版) 已启动。');
+        console.log('[CombatFramework] TRPG 通用回合制战斗框架 v2.0 已启动。');
     } catch (err) {
         console.error('[CombatFramework] 插件初始化失败:', err);
     }

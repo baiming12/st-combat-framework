@@ -319,6 +319,13 @@ export function normalizeSkill(sk, idx = 0) {
         applyStatuses,
         requiredTargetStatusIds: normalizeIdList(sk?.requiredTargetStatusIds),
         requiredSelfStatusIds: normalizeIdList(sk?.requiredSelfStatusIds),
+        requiredGaugeId: String(sk?.requiredGaugeId || '').trim(),
+        requiredGaugeMin: Number.isFinite(Number(sk?.requiredGaugeMin)) ? Math.round(Number(sk.requiredGaugeMin)) : 0,
+        hitRate: clamp(sk?.hitRate ?? 100, 1, 100),
+        critRate: clamp(sk?.critRate ?? 0, 0, 100),
+        critMultiplier: Number.isFinite(Number(sk?.critMultiplier)) && Number(sk.critMultiplier) >= 1
+            ? Number(Number(sk.critMultiplier).toFixed(2))
+            : 1.5,
         aiPriority: Math.max(1, Math.round(Number(sk?.aiPriority ?? 10) || 10)),
         aiHpBelowPercent: clamp(sk?.aiHpBelowPercent ?? 100, 1, 100),
     };
@@ -538,6 +545,9 @@ export function normalizeConfig(rawConfig, defaults) {
             spiMultiplier: Number.isFinite(Number(st?.spiMultiplier)) ? Number(st.spiMultiplier) : 1,
             defMultiplier: Number.isFinite(Number(st?.defMultiplier)) ? Number(st.defMultiplier) : 1,
             mdefMultiplier: Number.isFinite(Number(st?.mdefMultiplier)) ? Number(st.mdefMultiplier) : 1,
+            damageTakenMultiplier: Number.isFinite(Number(st?.damageTakenMultiplier)) && Number(st.damageTakenMultiplier) >= 0
+                ? Number(Number(st.damageTakenMultiplier).toFixed(2))
+                : 1,
             duration: Math.max(1, Math.round(Number(st?.duration ?? 1) || 1)),
             onExpireStatusIds: normalizeIdList(st?.onExpireStatusIds, st?.onExpireStatusId),
             // v1.7 束缚/禁锢机制字段
@@ -765,7 +775,49 @@ export function stripMarkdownJsonFence(rawText) {
     if (fenceMatch && fenceMatch[1]) {
         return fenceMatch[1].trim();
     }
+    // 容错：若未包代码块但前后带有 AI 说明文字，自动截取最外层 { ... } JSON 对象
+    const firstBrace = trimmed.indexOf('{');
+    const lastBrace = trimmed.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+        return trimmed.slice(firstBrace, lastBrace + 1).trim();
+    }
     return trimmed;
+}
+
+/**
+ * 规范化单个状态对象（导出供 ai_event_listener 动态收录新状态使用）
+ */
+export function normalizeStatusDef(st, idx = 0) {
+    const perTurnHp = Number.isFinite(Number(st?.perTurnHp)) ? Math.round(Number(st.perTurnHp)) : 0;
+    const perTurnMp = Number.isFinite(Number(st?.perTurnMp)) ? Math.round(Number(st.perTurnMp)) : 0;
+    const perTurnGauges = normalizeGaugeDeltaMap(st?.perTurnGauges, st?.perTurnGaugeA, st?.perTurnGaugeB);
+    return {
+        id: String(st?.id || `status_${idx + 1}`).trim() || `status_${idx + 1}`,
+        name: String(st?.name ?? `status_${idx + 1}`).trim() || `status_${idx + 1}`,
+        icon: String(st?.icon || '✨'),
+        description: String(st?.description || ''),
+        skipTurn: Boolean(st?.skipTurn || st?.effectType === 'skip_turn'),
+        perTurnHp,
+        perTurnMp,
+        perTurnGaugeA: perTurnGauges.gauge_a ?? 0,
+        perTurnGaugeB: perTurnGauges.gauge_b ?? 0,
+        perTurnGauges,
+        gaugeChangeMultipliers: normalizeGaugeMultipliers(st?.gaugeChangeMultipliers),
+        atkMultiplier: Number.isFinite(Number(st?.atkMultiplier)) ? Number(st.atkMultiplier) : 1,
+        spiMultiplier: Number.isFinite(Number(st?.spiMultiplier)) ? Number(st.spiMultiplier) : 1,
+        defMultiplier: Number.isFinite(Number(st?.defMultiplier)) ? Number(st.defMultiplier) : 1,
+        mdefMultiplier: Number.isFinite(Number(st?.mdefMultiplier)) ? Number(st.mdefMultiplier) : 1,
+        damageTakenMultiplier: Number.isFinite(Number(st?.damageTakenMultiplier)) && Number(st.damageTakenMultiplier) >= 0
+            ? Number(Number(st.damageTakenMultiplier).toFixed(2))
+            : 1,
+        duration: Math.max(1, Math.round(Number(st?.duration ?? 1) || 1)),
+        onExpireStatusIds: normalizeIdList(st?.onExpireStatusIds, st?.onExpireStatusId),
+        restraintType: ['physical', 'magical'].includes(st?.restraintType) ? st.restraintType : '',
+        restraintSourceMode: st?.restraintSourceMode === 'object' ? 'object' : 'caster',
+        restraintPower: Math.max(0, Number(st?.restraintPower ?? 0) || 0),
+        restraintObjectHp: Math.max(1, Math.round(Number(st?.restraintObjectHp ?? 50) || 50)),
+        restraintObjectName: String(st?.restraintObjectName || '').trim(),
+    };
 }
 
 /**
