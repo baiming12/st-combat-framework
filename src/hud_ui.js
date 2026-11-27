@@ -20,6 +20,7 @@ import {
     endPlayerTurn,
     equipItemOnUnit,
     executeAllyAction,
+    executeStruggleAction,
     executeUseItem,
     findClassById,
     findEquipmentById,
@@ -31,10 +32,13 @@ import {
     getEffectiveStats,
     getSkillRemainingCooldown,
     getUnitAvailableSkills,
+    getUnitStrugglePreview,
     grantSkillToUnit,
     isAlive,
+    isUnitRestrained,
     isWorldviewEnabled,
     levelUpUnit,
+    parseRestraintObjectTargetId,
     resetUnitAllocatedPoints,
     unequipItemFromUnit,
 } from './engine.js';
@@ -628,9 +632,11 @@ export async function initHudUI(deps) {
         const gADef = config.gauges?.gauge_a || { name: '状态槽A', color: '#e67e22' };
         const gBDef = config.gauges?.gauge_b || { name: '状态槽B', color: '#9b59b6' };
 
+        const unitRestrained = isUnitRestrained(unit, config);
         let stateTag = '';
         if (!alive) stateTag = '<span class="stcf-unit-tag stcf-tag-ko">倒下</span>';
         else if (eff.isStunned) stateTag = '<span class="stcf-unit-tag stcf-tag-stun">受控</span>';
+        else if (unitRestrained) stateTag = '<span class="stcf-unit-tag stcf-tag-bind">⛓️被束缚</span>';
         else if (unit.side === 'ally') {
             stateTag = unit.hasActed
                 ? '<span class="stcf-unit-tag stcf-tag-done">已行动</span>'
@@ -643,6 +649,8 @@ export async function initHudUI(deps) {
             let badgeText = String(st.remainingTurns);
             let sourceNote = `剩余 ${st.remainingTurns} 回合`;
             let extraClass = '';
+            let objBreakBtn = '';
+
             if (st.source === 'equipment') {
                 badgeText = '装';
                 sourceNote = `装备「${st.sourceLabel || ''}」常驻效果`;
@@ -651,9 +659,23 @@ export async function initHudUI(deps) {
                 badgeText = '⚡';
                 sourceNote = `阈值规则「${st.sourceLabel || ''}」维持生效`;
                 extraClass = 'stcf-chip-threshold';
+            } else if (def.restraintType) {
+                extraClass = 'stcf-chip-bind';
+                const kindText = def.restraintType === 'magical' ? '法术束缚' : '物理束缚';
+                if (def.restraintSourceMode === 'object' && st.objectHp > 0) {
+                    const objName = def.restraintObjectName || def.name;
+                    const objTargetKey = `restraint::${unit.id}::${st.statusId}`;
+                    const isPinned = state.selectedTargetId === objTargetKey;
+                    badgeText = `HP ${st.objectHp}/${st.objectMaxHp || st.objectHp}`;
+                    sourceNote = `${kindText}道具「${objName}」(${badgeText}，打破即释放)`;
+                    objBreakBtn = `<button type="button" class="stcf-break-btn ${isPinned ? 'active' : ''}" data-pin-target="${escapeHtml(objTargetKey)}" title="瞄准并攻击该禁锢道具（不会伤及队友）">🔨打碎</button>`;
+                } else {
+                    const casterName = st.casterId ? (findUnitById(state, st.casterId)?.name || st.casterId) : '未知';
+                    sourceNote = `${kindText}｜施法者：${casterName}（攻击施法者立即释放）`;
+                }
             }
             const tip = `${def.name}（${sourceNote}）：${def.description || '组合状态效果'}`;
-            return `<span class="stcf-status-chip ${extraClass}" title="${escapeHtml(tip)}">${escapeHtml(def.icon || '✨')} ${escapeHtml(def.name)} <b>${badgeText}</b></span>`;
+            return `<span class="stcf-status-chip ${extraClass}" title="${escapeHtml(tip)}">${escapeHtml(def.icon || '✨')} ${escapeHtml(def.name)} <b>${badgeText}</b>${objBreakBtn}</span>`;
         }).join('');
 
         const equipCount = (unit.equipmentIds || []).length;
@@ -769,18 +791,40 @@ export async function initHudUI(deps) {
 
             const actor = findUnitById(state, state.selectedActorId);
             const target = findUnitById(state, state.selectedTargetId);
+            const parsedObjTarget = parseRestraintObjectTargetId(state.selectedTargetId);
             elActorName.textContent = actor ? actor.name : '无';
-            elTargetName.textContent = target ? target.name : '自动';
+            if (parsedObjTarget) {
+                const boundU = findUnitById(state, parsedObjTarget.unitId);
+                const stObj = boundU?.statuses?.find(s => s.statusId === parsedObjTarget.statusId);
+                const stDef = findStatusDefById(config, parsedObjTarget.statusId);
+                const objName = stDef?.restraintObjectName || stDef?.name || '禁锢道具';
+                elTargetName.textContent = boundU && stObj
+                    ? `🔨 ${boundU.name}的「${objName}」(HP ${stObj.objectHp}/${stObj.objectMaxHp})`
+                    : '自动';
+            } else {
+                elTargetName.textContent = target ? target.name : '自动';
+            }
 
             const canAct = state.phase === 'player_turn' && actor && actor.side === 'ally' && isAlive(actor) && !actor.hasActed;
             const actorAlive = state.phase === 'player_turn' && actor && actor.side === 'ally' && isAlive(actor);
 
-            // 1. 技能栏（职业按等级解锁技能 + 通用/自身技能 + 穿戴装备附带技能）
+            // 1. 技能栏（被束缚时自动置顶显示「⛓️ 挣扎脱离」及实时概率，普通技能自动锁定）
+            const strugglePreview = actor ? getUnitStrugglePreview(state, config, actor) : null;
+            const struggleBtnHtml = strugglePreview ? (() => {
+                const tipLines = strugglePreview.items.map(x => `${x.name}：${x.detail}`).join('\n');
+                return `
+                    <button type="button" class="stcf-skill-btn stcf-struggle-btn" data-action="struggle" ${!canAct ? 'disabled' : ''} title="${escapeHtml(tipLines)}">
+                        <span class="stcf-skill-name">⛓️ 挣扎脱离</span>
+                        <span class="stcf-skill-meta">预计成功率 ${strugglePreview.minPercent}%</span>
+                    </button>
+                `;
+            })() : '';
+
             const availSkills = actor ? getUnitAvailableSkills(actor, config) : [];
-            if (availSkills.length === 0) {
+            if (availSkills.length === 0 && !struggleBtnHtml) {
                 elSkillsBar.innerHTML = '<span class="stcf-muted">该角色尚未配置技能，请到「成长/职业」或扩展设置中添加。</span>';
             } else {
-                elSkillsBar.innerHTML = availSkills.map(({ skill: sk, fromEquipmentName, fromClassName }) => {
+                elSkillsBar.innerHTML = struggleBtnHtml + availSkills.map(({ skill: sk, fromEquipmentName, fromClassName }) => {
                     const lackMp = actor && actor.mp < sk.mpCost;
                     const remCd = actor ? getSkillRemainingCooldown(actor, sk.id) : 0;
                     const preCheck = actor ? checkSkillPrerequisite(state, config, actor, sk, state.selectedTargetId) : { ok: true };
@@ -961,7 +1005,7 @@ export async function initHudUI(deps) {
             return;
         }
 
-        const pinBtn = e.target.closest('.stcf-target-pin');
+        const pinBtn = e.target.closest('[data-pin-target]');
         if (pinBtn) {
             e.stopPropagation();
             state.selectedTargetId = pinBtn.dataset.pinTarget;
@@ -979,11 +1023,18 @@ export async function initHudUI(deps) {
         deps.onStateMutated();
     });
 
-    // 释放技能
+    // 释放技能 / 点击内置「⛓️ 挣扎脱离」
     elSkillsBar.addEventListener('click', async (e) => {
         const btn = e.target.closest('.stcf-skill-btn');
         if (!btn || btn.disabled) return;
         const state = deps.getBattleState();
+        if (btn.dataset.action === 'struggle') {
+            const res = executeStruggleAction(state, deps.getConfig(), state.selectedActorId);
+            if (!res.ok) { showToast(`⚠️ ${res.message}`); return; }
+            deps.onStateMutated();
+            await dispatchNewLogs(res.newLogs);
+            return;
+        }
         const res = executeAllyAction(state, deps.getConfig(), state.selectedActorId, btn.dataset.skillId, state.selectedTargetId);
         if (!res.ok) { showToast(`⚠️ ${res.message}`); return; }
         deps.onStateMutated();

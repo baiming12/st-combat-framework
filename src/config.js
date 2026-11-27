@@ -197,7 +197,7 @@ export function normalizeSkill(sk, idx = 0) {
         targetType: ['single_enemy', 'all_enemies', 'self', 'single_ally', 'all_allies'].includes(sk?.targetType)
             ? sk.targetType
             : 'single_enemy',
-        effectType: ['damage', 'heal', 'mp_restore', 'utility'].includes(sk?.effectType)
+        effectType: ['damage', 'heal', 'mp_restore', 'utility', 'struggle'].includes(sk?.effectType)
             ? sk.effectType
             : 'damage',
         formula: String(sk?.formula ?? '10'),
@@ -414,6 +414,12 @@ export function normalizeConfig(rawConfig, defaults) {
             mdefMultiplier: Number.isFinite(Number(st?.mdefMultiplier)) ? Number(st.mdefMultiplier) : 1,
             duration: Math.max(1, Math.round(Number(st?.duration ?? 1) || 1)),
             onExpireStatusIds: normalizeIdList(st?.onExpireStatusIds, st?.onExpireStatusId),
+            // v1.7 束缚/禁锢机制字段
+            restraintType: ['physical', 'magical'].includes(st?.restraintType) ? st.restraintType : '',
+            restraintSourceMode: st?.restraintSourceMode === 'object' ? 'object' : 'caster',
+            restraintPower: Math.max(0, Number(st?.restraintPower ?? 0) || 0),
+            restraintObjectHp: Math.max(1, Math.round(Number(st?.restraintObjectHp ?? 50) || 50)),
+            restraintObjectName: String(st?.restraintObjectName || '').trim(),
         };
     });
 

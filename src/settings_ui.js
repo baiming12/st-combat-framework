@@ -833,6 +833,7 @@ export async function initSettingsUI(deps) {
                                     <option value="heal" ${sk.effectType === 'heal' ? 'selected' : ''}>回复 HP</option>
                                     <option value="mp_restore" ${sk.effectType === 'mp_restore' ? 'selected' : ''}>回复 MP</option>
                                     <option value="utility" ${sk.effectType === 'utility' ? 'selected' : ''}>纯状态/特殊槽</option>
+                                    <option value="struggle" ${sk.effectType === 'struggle' ? 'selected' : ''}>⛓️ 挣扎脱离束缚</option>
                                 </select>
                             </label>
                         </div>
@@ -1218,6 +1219,11 @@ export async function initSettingsUI(deps) {
             atkMultiplier: 1, spiMultiplier: 1, defMultiplier: 1, mdefMultiplier: 1,
             duration: 2,
             onExpireStatusIds: [],
+            restraintType: '',
+            restraintSourceMode: 'caster',
+            restraintPower: 0,
+            restraintObjectHp: 50,
+            restraintObjectName: '',
         });
         commitChange(true, `st:${id}`);
     });
@@ -1232,13 +1238,16 @@ export async function initSettingsUI(deps) {
             const cardKey = `st:${st.id}`;
             const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
             const expIds = Array.isArray(st.onExpireStatusIds) ? st.onExpireStatusIds : [];
+            const bindTag = st.restraintType === 'physical'
+                ? ' · ⛓️物理束缚'
+                : (st.restraintType === 'magical' ? ' · ⛓️法术束缚' : '');
 
             return `
                 <details class="stcf-item-card stcf-fold" data-index="${idx}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
                     <summary class="stcf-fold-summary">
                         <span class="stcf-fold-title">
                             ${escapeHtml(st.icon || '✨')} <strong>${escapeHtml(st.name)}</strong>
-                            <small class="stcf-muted">${st.duration}回合${st.skipTurn ? ' · 💫跳回合' : ''}${expIds.length ? ` · 结束转${expIds.length}态` : ''}</small>
+                            <small class="stcf-muted">${st.duration}回合${st.skipTurn ? ' · 💫跳回合' : ''}${bindTag}${expIds.length ? ` · 结束转${expIds.length}态` : ''}</small>
                         </span>
                         <span class="stcf-fold-right">
                             <span class="stcf-id-tag">${escapeHtml(st.id)}</span>
@@ -1271,6 +1280,31 @@ export async function initSettingsUI(deps) {
                             <label class="stcf-mini-field"><span>持续回合数</span><input type="number" min="1" class="text_pole" data-field="duration" value="${st.duration}"></label>
                         </div>
                         <details class="stcf-sub-fold">
+                            <summary>⛓️ 束缚/禁锢机制（${st.restraintType ? (st.restraintType === 'magical' ? '法术类束缚' : '物理类束缚') : '未开启'}）</summary>
+                            <div class="stcf-sub-body">
+                                <div class="stcf-grid-2">
+                                    <label class="stcf-mini-field"><span>束缚类型（开启后无法放普通技能，只能挣扎）</span>
+                                        <select class="text_pole" data-field="restraintType">
+                                            <option value="" ${!st.restraintType ? 'selected' : ''}>非束缚状态</option>
+                                            <option value="physical" ${st.restraintType === 'physical' ? 'selected' : ''}>物理类束缚（HP% × 自身力量/对抗值）</option>
+                                            <option value="magical" ${st.restraintType === 'magical' ? 'selected' : ''}>法术类束缚（MP% × 自身精神/对抗值）</option>
+                                        </select>
+                                    </label>
+                                    <label class="stcf-mini-field"><span>束缚维持来源</span>
+                                        <select class="text_pole" data-field="restraintSourceMode">
+                                            <option value="caster" ${st.restraintSourceMode !== 'object' ? 'selected' : ''}>施法者维持（攻击施法者即立刻释放）</option>
+                                            <option value="object" ${st.restraintSourceMode === 'object' ? 'selected' : ''}>禁锢道具/牢笼（拥有独立血量，打破释放）</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <div class="stcf-grid-3">
+                                    <label class="stcf-mini-field"><span>道具对抗强度值</span><input type="number" min="0" class="text_pole" data-field="restraintPower" value="${st.restraintPower ?? 0}" title="道具模式必填（如25）；施法者模式填0则自动读取施法者实时有效力量/精神"></label>
+                                    <label class="stcf-mini-field"><span>禁锢道具血量 HP</span><input type="number" min="1" class="text_pole" data-field="restraintObjectHp" value="${st.restraintObjectHp ?? 50}"></label>
+                                    <label class="stcf-mini-field"><span>禁锢道具显示名</span><input type="text" class="text_pole" data-field="restraintObjectName" value="${escapeHtml(st.restraintObjectName || '')}" placeholder="留空默认用状态名"></label>
+                                </div>
+                            </div>
+                        </details>
+                        <details class="stcf-sub-fold">
                             <summary>🔄 倒计时结束后转化为新状态（支持多选 · 已选 ${expIds.length} 项）</summary>
                             <div class="stcf-sub-body stcf-chips-wrap">${renderStatusCheckChips(cfg, expIds, 'data-status-expire-id')}</div>
                         </details>
@@ -1292,7 +1326,7 @@ export async function initSettingsUI(deps) {
         st.onExpireStatusIds = [...set];
         commitChange();
     });
-    bindSimpleListEvents(elStatusesEditor, () => deps.getConfig().statuses, ['name', 'icon']);
+    bindSimpleListEvents(elStatusesEditor, () => deps.getConfig().statuses, ['name', 'icon', 'restraintType']);
 
     // =========================================================================
     // 七、阈值触发规则编辑器（默认折叠 + 达标同时挂载多个 Buff + Prompt 注入）

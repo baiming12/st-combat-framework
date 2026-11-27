@@ -776,9 +776,15 @@ function applyGaugeDelta(unit, gaugeKey, delta, config) {
 }
 
 /**
- * 尝试给单位挂载普通状态（若已存在同名普通状态则刷新持续回合数）
+ * 尝试给单位挂载普通状态（若已存在同名普通状态则刷新持续回合数；v1.7 束缚状态自动记录施法者或道具血量）
+ * @param {object} target
+ * @param {string} statusId
+ * @param {number} chance 0~100
+ * @param {object} config
+ * @param {object|null} [caster=null]
+ * @returns {string}
  */
-function tryApplyStatus(target, statusId, chance, config) {
+function tryApplyStatus(target, statusId, chance, config, caster = null) {
     if (!statusId || !isAlive(target)) return '';
     const def = findStatusDefById(config, statusId);
     if (!def) return '';
@@ -788,18 +794,251 @@ function tryApplyStatus(target, statusId, chance, config) {
         return '';
     }
 
+    const isObjectRestraint = Boolean(def.restraintType && def.restraintSourceMode === 'object');
+    const isCasterRestraint = Boolean(def.restraintType && def.restraintSourceMode !== 'object');
+    const objHp = Math.max(1, Math.round(Number(def.restraintObjectHp ?? 50) || 50));
+
     const existing = target.statuses.find(s => s.statusId === statusId && (!s.source || s.source === 'normal'));
     if (existing) {
         existing.remainingTurns = Math.max(existing.remainingTurns, def.duration);
+        if (isCasterRestraint && caster?.id) existing.casterId = caster.id;
+        if (isObjectRestraint) {
+            existing.objectMaxHp = objHp;
+            existing.objectHp = Math.max(existing.objectHp || 0, objHp);
+        }
         return `刷新状态「${def.name}」(${existing.remainingTurns}回合)`;
     }
 
-    target.statuses.push({
+    const entry = {
         statusId: def.id,
         remainingTurns: def.duration,
         source: 'normal',
-    });
+    };
+    if (isCasterRestraint && caster?.id) {
+        entry.casterId = caster.id;
+    }
+    if (isObjectRestraint) {
+        entry.objectMaxHp = objHp;
+        entry.objectHp = objHp;
+    }
+
+    target.statuses.push(entry);
+    if (isObjectRestraint) {
+        const objLabel = def.restraintObjectName || def.name;
+        return `施加禁锢「${objLabel}」(HP ${objHp}，${def.duration}回合)`;
+    }
     return `附加状态「${def.name}」(${def.duration}回合)`;
+}
+
+/**
+ * =========================================================================
+ * 三点五、束缚/禁锢与挣扎解救机制（v1.7 新增）
+ * - 物理束缚挣脱概率 = (HP/maxHP) * (我方有效力量atk / 敌方有效力量atk 或 物理禁锢道具强度值)
+ * - 法术束缚挣脱概率 = (MP/maxMP) * (我方有效精神spi / 敌方有效精神spi 或 法术禁锢道具强度值)
+ * - 攻击施法者维持型束缚的施法者 -> 立即解除所有被其束缚的单位
+ * - 攻击禁锢道具 -> 扣除道具血量，归零立即破碎解除
+ * =========================================================================
+ */
+
+/** 解析禁锢道具目标 ID（格式：restraint::<unitId>::<statusId>） */
+export function parseRestraintObjectTargetId(targetId) {
+    if (typeof targetId !== 'string' || !targetId.startsWith('restraint::')) return null;
+    const parts = targetId.split('::');
+    if (parts.length < 3) return null;
+    return { unitId: parts[1], statusId: parts.slice(2).join('::') };
+}
+
+/** 获取单位身上当前全部激活的束缚/禁锢状态列表 */
+export function getUnitRestraints(unit, config) {
+    if (!unit || !Array.isArray(unit.statuses)) return [];
+    const list = [];
+    for (const st of unit.statuses) {
+        const def = findStatusDefById(config, st.statusId);
+        if (def && (def.restraintType === 'physical' || def.restraintType === 'magical')) {
+            list.push({ active: st, def });
+        }
+    }
+    return list;
+}
+
+/** 判断单位当前是否处于束缚/禁锢状态（无法释放普通技能） */
+export function isUnitRestrained(unit, config) {
+    return getUnitRestraints(unit, config).length > 0;
+}
+
+/**
+ * 计算单条束缚状态的实时挣脱概率（严格使用叠加 Buff/装备/加点后的有效属性！）
+ * @param {object} state
+ * @param {object} config
+ * @param {object} unit 被束缚者
+ * @param {{ active: object, def: object }} restraint
+ * @returns {{ chance: number, percent: number, detail: string }}
+ */
+export function calculateStruggleChance(state, config, unit, restraint) {
+    const { active, def } = restraint;
+    const unitEff = getEffectiveStats(unit, config);
+    const isMag = def.restraintType === 'magical';
+
+    const ratio = isMag
+        ? (unit.maxMp > 0 ? clamp(unit.mp / unit.maxMp, 0, 1) : 0)
+        : (unit.maxHp > 0 ? clamp(unit.hp / unit.maxHp, 0, 1) : 0);
+
+    const myStat = isMag ? unitEff.spi : unitEff.atk;
+    const myStatLabel = isMag ? '精神' : '力量/物攻';
+    const ratioLabel = isMag ? `MP比${Math.round(ratio * 100)}%` : `HP比${Math.round(ratio * 100)}%`;
+
+    let resistStat = 0;
+    let resistLabel = '';
+
+    if (def.restraintSourceMode === 'object') {
+        resistStat = Math.max(1, Number(def.restraintPower) || 20);
+        resistLabel = `${def.restraintObjectName || def.name}强度${resistStat}`;
+    } else {
+        const caster = active.casterId ? findUnitById(state, active.casterId) : null;
+        if (caster && isAlive(caster)) {
+            const casterEff = getEffectiveStats(caster, config);
+            resistStat = Math.max(1, isMag ? casterEff.spi : casterEff.atk);
+            resistLabel = `${caster.name}${myStatLabel}${resistStat}`;
+        } else {
+            resistStat = Math.max(1, Number(def.restraintPower) || 20);
+            resistLabel = `束缚强度${resistStat}`;
+        }
+    }
+
+    const rawChance = ratio * (myStat / resistStat);
+    const chance = clamp(rawChance, 0, 1);
+    const percent = Math.round(chance * 100);
+    const detail = `${ratioLabel} × (自身${myStatLabel}${myStat} / ${resistLabel}) = ${percent}%`;
+    return { chance, percent, detail };
+}
+
+/**
+ * 获取单位当前综合挣扎概率预览（取各束缚中最低概率，供 HUD 按钮展示）
+ */
+export function getUnitStrugglePreview(state, config, unit) {
+    const restraints = getUnitRestraints(unit, config);
+    if (restraints.length === 0) return null;
+    const items = restraints.map(r => ({
+        name: r.def.restraintObjectName || r.def.name,
+        restraintType: r.def.restraintType,
+        ...calculateStruggleChance(state, config, unit, r),
+    }));
+    const minPercent = Math.min(...items.map(x => x.percent));
+    return { minPercent, items };
+}
+
+/**
+ * 当施法者受到攻击（或倒下）时，立即释放所有由该施法者维持的束缚状态
+ */
+export function releaseRestraintsByCaster(state, config, casterId, triggerReason = '受到攻击被打断') {
+    if (!state || !casterId) return [];
+    const caster = findUnitById(state, casterId);
+    const casterName = caster?.name || casterId;
+    const releasedLogs = [];
+
+    for (const unit of getAllUnits(state)) {
+        if (!Array.isArray(unit.statuses) || unit.statuses.length === 0) continue;
+        const removedNames = [];
+        unit.statuses = unit.statuses.filter(st => {
+            const def = findStatusDefById(config, st.statusId);
+            if (def && def.restraintType && def.restraintSourceMode !== 'object' && st.casterId === casterId) {
+                removedNames.push(def.name);
+                return false;
+            }
+            return true;
+        });
+        if (removedNames.length > 0) {
+            const line = `🔓 ${casterName} ${triggerReason}，${unit.name} 身上的束缚「${removedNames.join('、')}」立即解除！`;
+            appendBattleLog(state, line);
+            releasedLogs.push(line);
+        }
+    }
+    return releasedLogs;
+}
+
+/**
+ * 内部执行一次挣扎判定（玩家手动挣扎、自定义挣扎技能与敌方 AI 挣扎共用）
+ */
+function performStruggleAction(state, config, actor, skill = null) {
+    if (!isAlive(actor)) {
+        return { ok: false, message: `${actor.name} 已失去战斗能力。` };
+    }
+    const restraints = getUnitRestraints(actor, config);
+    if (restraints.length === 0) {
+        return { ok: false, message: `${actor.name} 当前并未被束缚/禁锢。` };
+    }
+    if (skill && actor.mp < (skill.mpCost || 0)) {
+        return { ok: false, message: `${actor.name} 的 MP 不足。` };
+    }
+
+    if (skill && skill.mpCost > 0) {
+        actor.mp = Math.max(0, actor.mp - skill.mpCost);
+    }
+    if (skill && (Number(skill.cooldown) || 0) > 0) {
+        if (!actor.cooldowns || typeof actor.cooldowns !== 'object') actor.cooldowns = {};
+        actor.cooldowns[skill.id] = Math.round(Number(skill.cooldown));
+    }
+    actor.hasActed = true;
+
+    const actionName = skill ? `使用了「${skill.name}」` : '尝试挣扎';
+    const brokenIds = new Set();
+    const summaries = [];
+
+    for (const r of restraints) {
+        const { chance, detail } = calculateStruggleChance(state, config, actor, r);
+        const roll = Math.random();
+        const label = r.def.restraintObjectName || r.def.name;
+        if (roll < chance) {
+            brokenIds.add(r.active.statusId);
+            summaries.push(`挣脱「${label}」成功！（${detail}）`);
+        } else {
+            summaries.push(`挣脱「${label}」失败（${detail}）`);
+        }
+    }
+
+    if (brokenIds.size > 0) {
+        actor.statuses = actor.statuses.filter(st => !brokenIds.has(st.statusId));
+    }
+
+    if (skill) {
+        applyGaugeDelta(actor, 'gauge_a', skill.selfGaugeAChange, config);
+        applyGaugeDelta(actor, 'gauge_b', skill.selfGaugeBChange, config);
+    }
+
+    appendBattleLog(state, `⛓️ ${actor.name} ${actionName}：${summaries.join('；')}。`);
+    return { ok: true };
+}
+
+/**
+ * 玩家点击内置「⛓️ 挣扎脱离」按钮入口
+ */
+export function executeStruggleAction(state, config, actorId, customSkill = null) {
+    if (!state || !state.active) return { ok: false, message: '请先开始战斗。', newLogs: [] };
+    if (state.phase !== 'player_turn') return { ok: false, message: '当前不是我方行动阶段。', newLogs: [] };
+
+    const actor = state.allies.find(u => u.id === actorId);
+    if (!actor) return { ok: false, message: '请先选择一名我方角色。', newLogs: [] };
+    if (actor.hasActed) return { ok: false, message: `${actor.name} 本回合已经行动过了。`, newLogs: [] };
+
+    const logStartIndex = state.currentRoundLogs.length;
+    const res = performStruggleAction(state, config, actor, customSkill);
+    if (!res.ok) return { ok: false, message: res.message, newLogs: [] };
+
+    const hasRemainingManual = state.allies.some(u => isAlive(u) && !u.hasActed && !u.autoControl);
+    if (!hasRemainingManual) {
+        runAutoAlliesTurn(state, config);
+        if (checkBattleOutcome(state)) {
+            syncDefaultSelections(state);
+            return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+        }
+    }
+    const hasRemainingActor = state.allies.some(u => isAlive(u) && !u.hasActed);
+    if (!hasRemainingActor && config.general?.autoEndPlayerTurn !== false) {
+        runEnemyTurnAndRoundEnd(state, config);
+    } else {
+        syncDefaultSelections(state);
+    }
+    return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
 }
 
 /**
@@ -891,6 +1130,14 @@ export function getSkillRemainingCooldown(unit, skillId) {
  * 3. 目标前置状态检查 (requiredTargetStatusIds：目标持有任一指定状态)
  */
 export function checkSkillPrerequisite(state, config, actor, skill, targetId) {
+    const restrained = isUnitRestrained(actor, config);
+    if (restrained && skill?.effectType !== 'struggle') {
+        return { ok: false, reason: '处于束缚/禁锢状态，无法释放普通技能（只能挣扎）' };
+    }
+    if (!restrained && skill?.effectType === 'struggle') {
+        return { ok: false, reason: '当前未被束缚，无需挣扎' };
+    }
+
     const cd = getSkillRemainingCooldown(actor, skill?.id);
     if (cd > 0) {
         return { ok: false, reason: `冷却中（剩余 ${cd} 回合）` };
@@ -906,6 +1153,15 @@ export function checkSkillPrerequisite(state, config, actor, skill, targetId) {
             const names = reqSelfIds.map(id => findStatusDefById(config, id)?.name || id).join(' / ');
             return { ok: false, reason: `需要自身持有【${names}】之一才可释放` };
         }
+    }
+
+    // 瞄准禁锢道具时允许使用伤害类技能攻击该禁锢物
+    const parsedObj = parseRestraintObjectTargetId(targetId);
+    if (parsedObj) {
+        if (skill?.effectType !== 'damage') {
+            return { ok: false, reason: '只能使用伤害类技能攻击禁锢道具' };
+        }
+        return { ok: true };
     }
 
     const reqIds = Array.isArray(skill?.requiredTargetStatusIds)
@@ -941,6 +1197,56 @@ function performSkill(state, config, actor, skill, targetId) {
     const preCheck = checkSkillPrerequisite(state, config, actor, skill, targetId);
     if (!preCheck.ok) {
         return { ok: false, message: preCheck.reason, logs: actionLogs };
+    }
+
+    // 若为自定义挣扎技能 (effectType === 'struggle')，直接走挣扎判定流程
+    if (skill.effectType === 'struggle') {
+        const res = performStruggleAction(state, config, actor, skill);
+        return { ok: res.ok, message: res.message, logs: actionLogs };
+    }
+
+    // 若目标为禁锢道具 (restraint::<unitId>::<statusId>)，直接攻击道具血量，不伤及队友
+    const parsedObj = parseRestraintObjectTargetId(targetId);
+    if (parsedObj) {
+        const boundUnit = findUnitById(state, parsedObj.unitId);
+        const stIdx = boundUnit ? (boundUnit.statuses || []).findIndex(s => s.statusId === parsedObj.statusId && s.objectHp > 0) : -1;
+        if (!boundUnit || stIdx < 0) {
+            return { ok: false, message: '该禁锢道具已破碎或不存在。', logs: actionLogs };
+        }
+        const stObj = boundUnit.statuses[stIdx];
+        const stDef = findStatusDefById(config, stObj.statusId);
+        const objLabel = stDef?.restraintObjectName || stDef?.name || '禁锢道具';
+
+        actor.mp = Math.max(0, actor.mp - skill.mpCost);
+        actor.hasActed = true;
+        if ((Number(skill.cooldown) || 0) > 0) {
+            if (!actor.cooldowns || typeof actor.cooldowns !== 'object') actor.cooldowns = {};
+            actor.cooldowns[skill.id] = Math.round(Number(skill.cooldown));
+        }
+
+        // 以 0 双抗虚拟对象计算对禁锢道具造成的伤害
+        const dummyTarget = {
+            hp: stObj.objectHp,
+            maxHp: stObj.objectMaxHp || stObj.objectHp,
+            baseAtk: 0, baseSpi: 0, baseDef: 0, baseMdef: 0,
+            gauges: { gauge_a: 0, gauge_b: 0 },
+            statuses: [], equipmentIds: [],
+        };
+        const vars = buildFormulaVars(actor, dummyTarget, config);
+        const dmg = Math.max(1, evaluateFormula(skill.formula, vars));
+        stObj.objectHp = Math.max(0, stObj.objectHp - dmg);
+
+        let resultNote = `剩余 HP ${stObj.objectHp}/${stObj.objectMaxHp}`;
+        if (stObj.objectHp <= 0) {
+            boundUnit.statuses.splice(stIdx, 1);
+            resultNote = `禁锢物被击碎，${boundUnit.name} 恢复自由！`;
+            state.selectedTargetId = state.enemies.find(isAlive)?.id || '';
+        }
+        const mpNote = skill.mpCost > 0 ? `（消耗 ${skill.mpCost} MP）` : '';
+        const line = `🔨 ${actor.name} 使用了「${skill.name}」${mpNote}攻击 ${boundUnit.name} 身上的「${objLabel}」，造成 ${dmg} 点伤害（${resultNote}）。`;
+        appendBattleLog(state, line);
+        actionLogs.push(line);
+        return { ok: true, logs: actionLogs };
     }
 
     const targets = resolveTargets(state, actor, skill.targetType, targetId);
@@ -980,12 +1286,13 @@ function performSkill(state, config, actor, skill, targetId) {
     const applyEntries = getApplyStatusEntries(skill);
     for (const entry of applyEntries) {
         if (entry.target === 'self') {
-            const stText = tryApplyStatus(actor, entry.statusId, entry.chance, config);
+            const stText = tryApplyStatus(actor, entry.statusId, entry.chance, config, actor);
             if (stText) selfNotes.push(stText);
         }
     }
 
     const targetSummaries = [];
+    const attackedTargetIds = [];
 
     for (const target of targets) {
         const vars = buildFormulaVars(actor, target, config);
@@ -994,6 +1301,7 @@ function performSkill(state, config, actor, skill, targetId) {
 
         if (skill.effectType === 'damage') {
             target.hp = Math.max(0, target.hp - amount);
+            attackedTargetIds.push(target.id);
             notes.push(`造成 ${amount} 点伤害（剩余 HP ${target.hp}/${target.maxHp}）`);
             if (target.hp <= 0) notes.push('倒下');
         } else if (skill.effectType === 'heal') {
@@ -1011,10 +1319,10 @@ function performSkill(state, config, actor, skill, targetId) {
         if (tGA) notes.push(tGA);
         if (tGB) notes.push(tGB);
 
-        // v1.6：支持同时向目标附加多个状态
+        // v1.6：支持同时向目标附加多个状态（v1.7 传入施法者 actor 以支持打断施法者解除束缚）
         for (const entry of applyEntries) {
             if (entry.target !== 'self') {
-                const stText = tryApplyStatus(target, entry.statusId, entry.chance, config);
+                const stText = tryApplyStatus(target, entry.statusId, entry.chance, config, actor);
                 if (stText) notes.push(stText);
             }
         }
@@ -1028,6 +1336,14 @@ function performSkill(state, config, actor, skill, targetId) {
 
     appendBattleLog(state, line);
     actionLogs.push(line);
+
+    // v1.7：攻击了正在维持束缚的施法者 -> 立即释放所有被该施法者束缚的单位！
+    for (const hitId of attackedTargetIds) {
+        const hitUnit = findUnitById(state, hitId);
+        const reason = hitUnit && !isAlive(hitUnit) ? '被击倒' : '受到攻击被打断';
+        const freed = releaseRestraintsByCaster(state, config, hitId, reason);
+        actionLogs.push(...freed);
+    }
 
     return { ok: true, logs: actionLogs };
 }
@@ -1062,7 +1378,12 @@ export function syncDefaultSelections(state) {
     }
 
     const currentTarget = findUnitById(state, state.selectedTargetId);
-    if (!currentTarget || !isAlive(currentTarget)) {
+    const parsedObj = parseRestraintObjectTargetId(state.selectedTargetId);
+    const validObjTarget = parsedObj && (() => {
+        const u = findUnitById(state, parsedObj.unitId);
+        return Boolean(u && (u.statuses || []).some(s => s.statusId === parsedObj.statusId && s.objectHp > 0));
+    })();
+    if (!validObjTarget && (!currentTarget || !isAlive(currentTarget))) {
         const firstAliveEnemy = state.enemies.find(isAlive) || state.enemies[0];
         state.selectedTargetId = firstAliveEnemy?.id || '';
     }
@@ -1102,6 +1423,7 @@ export function pickAiSkillAndTarget(state, config, actor) {
     const actorHpPct = actor.maxHp > 0 ? (actor.hp / actor.maxHp) * 100 : 100;
 
     const pickTargetForSkill = (sk) => {
+        if (sk.effectType === 'struggle') return null;
         if (getSkillRemainingCooldown(actor, sk.id) > 0) return null;
         const reqSelfIds = Array.isArray(sk.requiredSelfStatusIds) ? sk.requiredSelfStatusIds.filter(Boolean) : [];
         if (reqSelfIds.length > 0) {
@@ -1187,6 +1509,12 @@ function runAutoAlliesTurn(state, config) {
         if (!isAlive(ally) || ally.hasActed || !ally.autoControl) continue;
         if (checkBattleOutcome(state)) return;
 
+        // v1.7：被束缚的托管队友自动尝试挣扎
+        if (isUnitRestrained(ally, config)) {
+            performStruggleAction(state, config, ally, null);
+            continue;
+        }
+
         const chosenPair = pickAiSkillAndTarget(state, config, ally);
         if (!chosenPair) {
             ally.hasActed = true;
@@ -1258,6 +1586,50 @@ export function executeUseItem(state, config, actorId, itemId, targetId) {
         return { ok: false, message: `${actor.name} 本回合已行动（该道具会消耗行动回合）。`, newLogs: [] };
     }
 
+    // 使用伤害类道具攻击禁锢道具时直接扣除禁锢物血量
+    const parsedObj = parseRestraintObjectTargetId(targetId);
+    if (parsedObj) {
+        if (item.effectType !== 'damage') {
+            return { ok: false, message: '只能使用伤害类道具攻击禁锢道具。', newLogs: [] };
+        }
+        const boundUnit = findUnitById(state, parsedObj.unitId);
+        const stIdx = boundUnit ? (boundUnit.statuses || []).findIndex(s => s.statusId === parsedObj.statusId && s.objectHp > 0) : -1;
+        if (!boundUnit || stIdx < 0) return { ok: false, message: '该禁锢道具已破碎。', newLogs: [] };
+        const stObj = boundUnit.statuses[stIdx];
+        const stDef = findStatusDefById(config, stObj.statusId);
+        const objLabel = stDef?.restraintObjectName || stDef?.name || '禁锢道具';
+
+        const logStartIndex = state.currentRoundLogs.length;
+        item.quantity = Math.max(0, item.quantity - 1);
+        if (item.consumesTurn) actor.hasActed = true;
+        const dummyTarget = {
+            hp: stObj.objectHp,
+            maxHp: stObj.objectMaxHp || stObj.objectHp,
+            baseAtk: 0, baseSpi: 0, baseDef: 0, baseMdef: 0,
+            gauges: { gauge_a: 0, gauge_b: 0 },
+            statuses: [], equipmentIds: [],
+        };
+        const dmg = Math.max(1, evaluateFormula(item.formula, buildFormulaVars(actor, dummyTarget, config)));
+        stObj.objectHp = Math.max(0, stObj.objectHp - dmg);
+        let note = `剩余 HP ${stObj.objectHp}/${stObj.objectMaxHp}`;
+        if (stObj.objectHp <= 0) {
+            boundUnit.statuses.splice(stIdx, 1);
+            note = `禁锢物被击碎，${boundUnit.name} 恢复自由！`;
+            state.selectedTargetId = state.enemies.find(isAlive)?.id || '';
+        }
+        appendBattleLog(state, `🔨 ${actor.name} 使用道具「${item.name}」攻击「${objLabel}」，造成 ${dmg} 点伤害（${note}）。`);
+        if (item.consumesTurn) {
+            const hasRemainingManual = state.allies.some(u => isAlive(u) && !u.hasActed && !u.autoControl);
+            if (!hasRemainingManual) runAutoAlliesTurn(state, config);
+            if (!state.allies.some(u => isAlive(u) && !u.hasActed) && config.general?.autoEndPlayerTurn !== false) {
+                runEnemyTurnAndRoundEnd(state, config);
+            } else {
+                syncDefaultSelections(state);
+            }
+        }
+        return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+    }
+
     const targets = resolveTargets(state, actor, item.targetType, targetId);
     if (targets.length === 0) return { ok: false, message: '没有可生效的存活目标。', newLogs: [] };
 
@@ -1268,6 +1640,7 @@ export function executeUseItem(state, config, actorId, itemId, targetId) {
     }
 
     const targetSummaries = [];
+    const attackedIds = [];
     for (const target of targets) {
         const vars = buildFormulaVars(actor, target, config);
         const amount = Math.max(0, evaluateFormula(item.formula, vars));
@@ -1283,12 +1656,12 @@ export function executeUseItem(state, config, actorId, itemId, targetId) {
             notes.push(`回复 ${target.mp - before} 点 MP（当前 ${target.mp}/${target.maxMp}）`);
         } else if (item.effectType === 'damage') {
             target.hp = Math.max(0, target.hp - amount);
+            attackedIds.push(target.id);
             notes.push(`造成 ${amount} 点伤害（剩余 HP ${target.hp}/${target.maxHp}）`);
             if (target.hp <= 0) notes.push('倒下');
         } else if (item.effectType === 'cleanse') {
             const removed = [];
             target.statuses = (target.statuses || []).filter(st => {
-                // 仅清除临时战斗状态，不误删装备常驻 Buff 或条件维持态
                 if (st.source === 'equipment' || st.source === 'threshold') return true;
                 const def = findStatusDefById(config, st.statusId);
                 if (def) removed.push(def.name);
@@ -1303,7 +1676,7 @@ export function executeUseItem(state, config, actorId, itemId, targetId) {
         if (tGB) notes.push(tGB);
 
         for (const entry of getApplyStatusEntries(item)) {
-            const stText = tryApplyStatus(target, entry.statusId, entry.chance, config);
+            const stText = tryApplyStatus(target, entry.statusId, entry.chance, config, actor);
             if (stText) notes.push(stText);
         }
 
@@ -1314,6 +1687,9 @@ export function executeUseItem(state, config, actorId, itemId, targetId) {
         state,
         `${actor.name} 使用了道具「${item.name}」（剩余 ${item.quantity}）：${targetSummaries.join('；')}。`
     );
+    for (const hitId of attackedIds) {
+        releaseRestraintsByCaster(state, config, hitId, '受到道具攻击被打断');
+    }
 
     if (checkBattleOutcome(state)) {
         syncDefaultSelections(state);
@@ -1435,6 +1811,12 @@ function runEnemyTurnAndRoundEnd(state, config) {
             continue;
         }
 
+        // v1.7：被束缚的敌方自动尝试挣扎脱离
+        if (isUnitRestrained(enemy, config)) {
+            performStruggleAction(state, config, enemy, null);
+            continue;
+        }
+
         const chosenPair = pickAiSkillAndTarget(state, config, enemy);
         if (!chosenPair) {
             appendBattleLog(state, `${enemy.name} 暂无可满足释放条件的技能，本回合原地待命。`);
@@ -1511,6 +1893,7 @@ function runRoundEndSettlement(state, config) {
                 }
                 if (unit.hp <= 0) {
                     appendBattleLog(state, `${unit.name} 倒下了！`);
+                    releaseRestraintsByCaster(state, config, unit.id, '因持续伤害倒下');
                 }
 
                 // 装备常驻 Buff 与阈值维持态 Buff 不随回合倒计时消失
