@@ -79,6 +79,46 @@
             "sticky": 0,
             "cooldown": 0,
             "delay": 0
+        },
+        "2": {
+            "uid": 2,
+            "key": [
+                "MVU",
+                "Zod",
+                "变量",
+                "stat_data",
+                "Schema",
+                "战斗变量"
+            ],
+            "keysecondary": [],
+            "comment": "【写卡助手】MVU Zod 标准 combat 区块联动规范（与战斗插件双向对齐）",
+            "content": "当用户制作「带 MVU Zod 的 RPG 战斗角色卡」时，必须在 MVU Zod 的根 Schema（stat_data）下固定包含以下轻量 `combat` 子区块，用于与战斗插件 (st-combat-framework v1.4) 双向自动同步。\n\n【重要原则】\n1. 只把战斗相关的少量字段放进 `combat` 区块；卡片原本的「时间、地点、好感度、内心想法、任务进度」等其他变量照常放在外面，完全互不干扰。\n2. 严禁把沉重的 Buff 列表塞进 MVU Zod（Buff 由战斗插件内部结算，无需同步进 MVU）。\n3. `combat` 里出现的所有角色 ID（如 `ally_01`）、装备 ID（`equip_01`）、技能 ID（`skill_01`）、道具 ID（`item_01`）、敌人 ID（`enemy_01`），必须与同时生成的战斗插件 JSON 配置中的 ID 严格一一对应！\n\n【标准 Zod Schema 模板（直接合并进角色卡的 Zod 脚本）】\n```ts\nconst CombatAllySchema = z.object({\n  hp: z.number().int().min(0),\n  mp: z.number().int().min(0),\n  gauge_a: z.number().int().min(0).max(100),\n  gauge_b: z.number().int().min(0).max(100),\n  equipmentIds: z.array(z.string()), // 当前穿戴的装备 ID 列表\n  skillIds: z.array(z.string()),     // 当前已学会的技能 ID 列表\n});\n\nconst CombatBlockSchema = z.object({\n  in_combat: z.boolean().default(false), // 插件自动维护：当前是否处于战斗中（仅供状态栏展示）\n  allies: z.record(z.string(), CombatAllySchema),\n  items: z.record(z.string(), z.number().int().min(0)), // 键为道具 ID，值为剩余数量\n  encounter_enemy_ids: z.array(z.string()).default([]), // 剧情遇敌时 AI 填入敌人 ID 数组，插件确认开战后自动清空\n  reinforce_enemy_ids: z.array(z.string()).default([]), // 战斗中增援时 AI 填入敌人 ID 数组，插件塞入战场后自动清空\n});\n```\n\n【初始 stat_data.combat 示例】\n```json\n\"combat\": {\n  \"in_combat\": false,\n  \"allies\": {\n    \"ally_01\": {\n      \"hp\": 120,\n      \"mp\": 60,\n      \"gauge_a\": 0,\n      \"gauge_b\": 0,\n      \"equipmentIds\": [\"equip_01\"],\n      \"skillIds\": [\"skill_01\", \"skill_02\"]\n    }\n  },\n  \"items\": {\n    \"item_01\": 3,\n    \"item_02\": 2\n  },\n  \"encounter_enemy_ids\": [],\n  \"reinforce_enemy_ids\": []\n}\n```",
+            "constant": true,
+            "vectorized": false,
+            "selective": true,
+            "selectiveLogic": 0,
+            "addMemo": true,
+            "order": 102,
+            "position": 0,
+            "disable": false,
+            "excludeRecursion": false,
+            "preventRecursion": false,
+            "delayUntilRecursion": false,
+            "probability": 100,
+            "useProbability": true,
+            "depth": 4,
+            "group": "",
+            "groupOverride": false,
+            "groupWeight": 100,
+            "scanDepth": null,
+            "caseSensitive": null,
+            "matchWholeWords": null,
+            "useGroupScoring": null,
+            "automationId": "",
+            "role": 0,
+            "sticky": 0,
+            "cooldown": 0,
+            "delay": 0
         }
     }
 }

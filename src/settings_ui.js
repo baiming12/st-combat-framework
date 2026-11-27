@@ -94,6 +94,9 @@ export async function initSettingsUI(deps) {
     // =========================================================================
     const elEnabled = container.querySelector('#stcf-set-enabled');
     const elPerChar = container.querySelector('#stcf-set-per-char');
+    const elMvuSync = container.querySelector('#stcf-set-mvu-sync');
+    const elMvuWriteBack = container.querySelector('#stcf-set-mvu-writeback');
+    const elMvuInherit = container.querySelector('#stcf-set-mvu-inherit');
     const elListenAi = container.querySelector('#stcf-set-listen-ai');
     const elSyncParty = container.querySelector('#stcf-set-sync-party');
     const elSyncBattle = container.querySelector('#stcf-set-sync-battle');
@@ -123,6 +126,9 @@ export async function initSettingsUI(deps) {
         deps.onConfigChanged();
         setIoStatus(elPerChar.checked ? '✅ 已开启按角色卡独立保存方案' : '✅ 已切换为全局共用方案');
     });
+    elMvuSync.addEventListener('change', () => { deps.getConfig().general.mvuSyncEnabled = elMvuSync.checked; commitChange(); });
+    elMvuWriteBack.addEventListener('change', () => { deps.getConfig().general.mvuWriteBack = elMvuWriteBack.checked; commitChange(); });
+    elMvuInherit.addEventListener('change', () => { deps.getConfig().general.mvuInheritVitalsOnStart = elMvuInherit.checked; commitChange(); });
     elListenAi.addEventListener('change', () => { deps.getConfig().general.listenAiEvents = elListenAi.checked; commitChange(); });
     elSyncParty.addEventListener('change', () => { deps.getConfig().general.syncPartyToAi = elSyncParty.checked; commitChange(); });
     elSyncBattle.addEventListener('change', () => { deps.getConfig().general.syncBattleToAi = elSyncBattle.checked; commitChange(); });
@@ -884,6 +890,9 @@ export async function initSettingsUI(deps) {
 
         elEnabled.checked = cfg.general.enabled !== false;
         elPerChar.checked = usePerChar;
+        elMvuSync.checked = cfg.general.mvuSyncEnabled !== false;
+        elMvuWriteBack.checked = cfg.general.mvuWriteBack !== false;
+        elMvuInherit.checked = cfg.general.mvuInheritVitalsOnStart !== false;
         elListenAi.checked = cfg.general.listenAiEvents !== false;
         elSyncParty.checked = cfg.general.syncPartyToAi !== false;
         elSyncBattle.checked = cfg.general.syncBattleToAi !== false;

@@ -36,8 +36,23 @@
                     </label>
 
                     <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-mvu-sync">
+                        <span>🔗 启用 MVU Zod 双向联动（自动读写 <code>stat_data.combat</code>，统一数据源，不同步 Buff）</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-mvu-writeback">
+                        <span>🔗 战斗中自动将最新血量/蓝量/状态槽/装备/道具数量写回 MVU Zod</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-mvu-inherit">
+                        <span>🔗 开战时继承 MVU Zod 中的当前 HP / MP / 状态槽（把日常剧情受伤带入战斗）</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
                         <input type="checkbox" id="stcf-set-listen-ai">
-                        <span>监听 AI 回复中的 <code>&lt;combat_event&gt;</code> 剧情掉落/发技能/刷怪/增援标签（需用户确认）</span>
+                        <span>监听 AI 回复中的 <code>&lt;combat_event&gt;</code> 标签（未装 MVU 的普通卡使用；MVU 卡可关闭）</span>
                     </label>
 
                     <label class="stcf-checkbox-row">

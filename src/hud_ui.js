@@ -9,6 +9,7 @@
  */
 
 import { saveConfig } from './config.js';
+import { applyMvuVitalsOnBattleStart } from './mvu_bridge.js';
 import {
     addEnemyToBattle,
     adjustUnitStatManual,
@@ -149,6 +150,7 @@ export async function initHudUI(deps) {
     const elHeader = root.querySelector('#stcf-hud-header');
     const elPhaseBadge = root.querySelector('#stcf-phase-badge');
     const elTurnBadge = root.querySelector('#stcf-turn-badge');
+    const elBtnSyncMvu = root.querySelector('#stcf-btn-sync-mvu');
     const elBtnAiContext = root.querySelector('#stcf-btn-ai-context');
     const elContextBox = root.querySelector('#stcf-context-box');
     const elContextChars = root.querySelector('#stcf-context-chars');
@@ -280,6 +282,10 @@ export async function initHudUI(deps) {
         render();
     });
 
+    elBtnSyncMvu.addEventListener('click', () => {
+        deps.onRequestSyncMvu?.();
+    });
+
     elBtnAiContext.addEventListener('click', () => {
         const isHidden = elContextBox.classList.toggle('stcf-hidden');
         elBtnAiContext.classList.toggle('active', !isHidden);
@@ -324,7 +330,9 @@ export async function initHudUI(deps) {
         if (cur && cur.active) {
             if (!window.confirm('确定要按当前设置重新开始战斗吗？当前血量和回合进度将被重置。')) return;
         }
-        const nextState = createBattleState(deps.getConfig());
+        const cfg = deps.getConfig();
+        const nextState = createBattleState(cfg);
+        applyMvuVitalsOnBattleStart(nextState, cfg);
         deps.setBattleState(nextState);
         deps.onStateMutated();
         showToast('⚔️ 已开启新战斗');
@@ -472,7 +480,11 @@ export async function initHudUI(deps) {
 
         if (act === 'dismiss') {
             pendingEvents.splice(evIdx, 1);
-            render();
+            if (ev.fromMvuField) {
+                deps.onStateMutated({ clearMvuField: ev.fromMvuField });
+            } else {
+                render();
+            }
             return;
         }
 
@@ -560,9 +572,10 @@ export async function initHudUI(deps) {
         if (ev.type === 'start_combat') {
             const resolved = resolveEventEnemies(ev, config);
             const nextState = createBattleState(config, resolved.length ? resolved : null);
+            applyMvuVitalsOnBattleStart(nextState, config);
             deps.setBattleState(nextState);
             pendingEvents.splice(evIdx, 1);
-            deps.onStateMutated();
+            deps.onStateMutated({ clearMvuField: ev.fromMvuField || '' });
             showToast('⚔️ 已按剧情敌人开启战斗！');
             return;
         }
@@ -571,6 +584,7 @@ export async function initHudUI(deps) {
             const resolved = resolveEventEnemies(ev, config);
             if (!state || !state.active) {
                 const nextState = createBattleState(config, resolved.length ? resolved : null);
+                applyMvuVitalsOnBattleStart(nextState, config);
                 deps.setBattleState(nextState);
                 showToast('⚔️ 已开启战斗并加入该敌人！');
             } else {
@@ -583,7 +597,7 @@ export async function initHudUI(deps) {
                 if (addedCount > 0) showToast(`🚨 已向当前战场塞入 ${addedCount} 名敌方增援！`);
             }
             pendingEvents.splice(evIdx, 1);
-            deps.onStateMutated();
+            deps.onStateMutated({ clearMvuField: ev.fromMvuField || '' });
         }
     });
 

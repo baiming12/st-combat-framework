@@ -220,6 +220,9 @@ export function normalizeConfig(rawConfig, defaults) {
     general.enabled = general.enabled !== false;
     general.usePerCharacterConfig = general.usePerCharacterConfig !== false;
     general.listenAiEvents = general.listenAiEvents !== false;
+    general.mvuSyncEnabled = general.mvuSyncEnabled !== false;
+    general.mvuWriteBack = general.mvuWriteBack !== false;
+    general.mvuInheritVitalsOnStart = general.mvuInheritVitalsOnStart !== false;
     general.syncPartyToAi = general.syncPartyToAi !== false;
     general.syncBattleToAi = general.syncBattleToAi !== false;
     general.syncCatalogToAi = general.syncCatalogToAi !== false;
