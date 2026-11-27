@@ -270,6 +270,9 @@ export function normalizeConfig(rawConfig, defaults) {
         applyStatusId: String(sk?.applyStatusId || ''),
         applyStatusChance: clamp(sk?.applyStatusChance ?? 100, 0, 100),
         applyStatusTarget: sk?.applyStatusTarget === 'self' ? 'self' : 'target',
+        requiredTargetStatusIds: Array.isArray(sk?.requiredTargetStatusIds)
+            ? sk.requiredTargetStatusIds.map(String).filter(Boolean)
+            : [],
     }));
 
     // 5. 装备库 & 道具库（v1.1 新增）

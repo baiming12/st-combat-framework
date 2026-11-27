@@ -11,6 +11,7 @@
 import { saveConfig } from './config.js';
 import {
     adjustUnitStatManual,
+    checkSkillPrerequisite,
     createBattleState,
     endPlayerTurn,
     equipItemOnUnit,
@@ -632,14 +633,16 @@ export async function initHudUI(deps) {
             } else {
                 elSkillsBar.innerHTML = availSkills.map(({ skill: sk, fromEquipmentName }) => {
                     const lackMp = actor && actor.mp < sk.mpCost;
-                    const disabled = !canAct || lackMp;
+                    const preCheck = actor ? checkSkillPrerequisite(state, config, actor, sk, state.selectedTargetId) : { ok: true };
+                    const disabled = !canAct || lackMp || !preCheck.ok;
                     const typeBadge = TARGET_TYPE_BADGES[sk.targetType] || '';
                     const equipTag = fromEquipmentName ? ` · 🛡️${fromEquipmentName}` : '';
-                    const tip = `${sk.description || sk.name}｜消耗 ${sk.mpCost} MP｜公式：${sk.formula}`;
+                    const lockTag = !preCheck.ok ? ' · 🔒需前置状态' : '';
+                    const tip = `${sk.description || sk.name}｜消耗 ${sk.mpCost} MP｜公式：${sk.formula}${!preCheck.ok ? `｜⚠️ ${preCheck.reason}` : ''}`;
                     return `
                         <button type="button" class="stcf-skill-btn" data-skill-id="${escapeHtml(sk.id)}" ${disabled ? 'disabled' : ''} title="${escapeHtml(tip)}">
-                            <span class="stcf-skill-name">${escapeHtml(sk.name)}</span>
-                            <span class="stcf-skill-meta">${typeBadge}${sk.mpCost > 0 ? ` · ${sk.mpCost}MP` : ''}${escapeHtml(equipTag)}</span>
+                            <span class="stcf-skill-name">${!preCheck.ok ? '🔒 ' : ''}${escapeHtml(sk.name)}</span>
+                            <span class="stcf-skill-meta">${typeBadge}${sk.mpCost > 0 ? ` · ${sk.mpCost}MP` : ''}${escapeHtml(equipTag)}${lockTag}</span>
                         </button>
                     `;
                 }).join('');

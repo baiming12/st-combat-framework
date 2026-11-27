@@ -215,7 +215,29 @@
             "targetGaugeBChange": 0,
             "applyStatusId": "buff_01",
             "applyStatusChance": 100,
-            "applyStatusTarget": "target"
+            "applyStatusTarget": "target",
+            "requiredTargetStatusIds": []
+        },
+        {
+            "id": "skill_06",
+            "name": "异常追击",
+            "description": "前置条件示例：仅当目标处于「持续损耗 / 行动受限 / 防御削弱」任意一种状态时才可释放，造成高额追击伤害",
+            "mpCost": 10,
+            "targetType": "single_enemy",
+            "effectType": "damage",
+            "formula": "max(1, atk * 2.2 - target_def * 0.2)",
+            "selfGaugeAChange": 10,
+            "selfGaugeBChange": 10,
+            "targetGaugeAChange": 15,
+            "targetGaugeBChange": 0,
+            "applyStatusId": "",
+            "applyStatusChance": 100,
+            "applyStatusTarget": "target",
+            "requiredTargetStatusIds": [
+                "debuff_01",
+                "debuff_02",
+                "debuff_03"
+            ]
         },
         {
             "id": "skill_enemy_01",
@@ -350,7 +372,8 @@
                 "skill_01",
                 "skill_02",
                 "skill_03",
-                "skill_04"
+                "skill_04",
+                "skill_06"
             ],
             "equipmentIds": [
                 "equip_01"

@@ -547,6 +547,36 @@ function buildFormulaVars(actor, target, config) {
     };
 }
 
+/**
+ * 检查技能的前置状态条件：要求目标至少持有 requiredTargetStatusIds 中的任意 1 个状态
+ * @param {object} state
+ * @param {object} config
+ * @param {object} actor
+ * @param {object} skill
+ * @param {string} targetId
+ * @returns {{ ok: boolean, reason?: string }}
+ */
+export function checkSkillPrerequisite(state, config, actor, skill, targetId) {
+    const reqIds = Array.isArray(skill?.requiredTargetStatusIds)
+        ? skill.requiredTargetStatusIds.filter(Boolean)
+        : [];
+    if (reqIds.length === 0) return { ok: true };
+
+    const targets = resolveTargets(state, actor, skill.targetType, targetId);
+    if (targets.length === 0) {
+        return { ok: false, reason: '没有可生效的存活目标。' };
+    }
+
+    const reqSet = new Set(reqIds);
+    const hasMatch = targets.some(t => (t.statuses || []).some(st => reqSet.has(st.statusId)));
+    if (hasMatch) return { ok: true };
+
+    const names = reqIds
+        .map(id => findStatusDefById(config, id)?.name || id)
+        .join(' / ');
+    return { ok: false, reason: `需要目标持有【${names}】之一才可释放` };
+}
+
 function performSkill(state, config, actor, skill, targetId) {
     const actionLogs = [];
 
@@ -555,6 +585,11 @@ function performSkill(state, config, actor, skill, targetId) {
     }
     if (actor.mp < skill.mpCost) {
         return { ok: false, message: `${actor.name} 的 MP/体力不足（需要 ${skill.mpCost}，当前 ${actor.mp}）。`, logs: actionLogs };
+    }
+
+    const preCheck = checkSkillPrerequisite(state, config, actor, skill, targetId);
+    if (!preCheck.ok) {
+        return { ok: false, message: preCheck.reason, logs: actionLogs };
     }
 
     const targets = resolveTargets(state, actor, skill.targetType, targetId);
@@ -881,34 +916,46 @@ function runEnemyTurnAndRoundEnd(state, config) {
             continue;
         }
 
-        const available = getUnitAvailableSkills(enemy, config)
+        // 为敌方挑选满足 MP 消耗且满足前置状态条件的可用技能与目标
+        const pickValidTargetForEnemySkill = (sk) => {
+            const reqIds = Array.isArray(sk.requiredTargetStatusIds) ? sk.requiredTargetStatusIds.filter(Boolean) : [];
+            const reqSet = new Set(reqIds);
+            const hasReq = (u) => reqSet.size === 0 || (u.statuses || []).some(st => reqSet.has(st.statusId));
+
+            if (sk.targetType === 'single_ally') {
+                const list = state.enemies.filter(u => isAlive(u) && hasReq(u))
+                    .sort((a, b) => (a.hp / a.maxHp) - (b.hp / b.maxHp));
+                return list[0]?.id || null;
+            }
+            if (sk.targetType === 'single_enemy') {
+                const list = state.allies.filter(u => isAlive(u) && hasReq(u));
+                return list.length > 0 ? list[Math.floor(Math.random() * list.length)].id : null;
+            }
+            if (sk.targetType === 'self') {
+                return hasReq(enemy) ? enemy.id : null;
+            }
+            return checkSkillPrerequisite(state, config, enemy, sk, '').ok ? '' : null;
+        };
+
+        const candidatePairs = getUnitAvailableSkills(enemy, config)
             .map(entry => entry.skill)
-            .filter(sk => sk && enemy.mp >= sk.mpCost);
+            .filter(sk => sk && enemy.mp >= sk.mpCost)
+            .map(sk => ({ skill: sk, targetId: pickValidTargetForEnemySkill(sk) }))
+            .filter(pair => pair.targetId !== null);
 
-        const fallbackSkill = (config.skills || []).find(sk => sk.mpCost <= enemy.mp);
-        const chosenSkill = available.length > 0
-            ? available[Math.floor(Math.random() * available.length)]
-            : fallbackSkill;
+        const fallbackSkill = (config.skills || []).find(
+            sk => sk.mpCost <= enemy.mp && pickValidTargetForEnemySkill(sk) !== null
+        );
+        const chosenPair = candidatePairs.length > 0
+            ? candidatePairs[Math.floor(Math.random() * candidatePairs.length)]
+            : (fallbackSkill ? { skill: fallbackSkill, targetId: pickValidTargetForEnemySkill(fallbackSkill) } : null);
 
-        if (!chosenSkill) {
-            appendBattleLog(state, `${enemy.name} 体力不足，本回合原地待命。`);
+        if (!chosenPair) {
+            appendBattleLog(state, `${enemy.name} 暂无可满足释放条件的技能，本回合原地待命。`);
             continue;
         }
 
-        let chosenTargetId = '';
-        if (chosenSkill.targetType === 'single_ally') {
-            const aliveEnemyAllies = state.enemies.filter(isAlive).sort((a, b) => (a.hp / a.maxHp) - (b.hp / b.maxHp));
-            chosenTargetId = aliveEnemyAllies[0]?.id || enemy.id;
-        } else if (chosenSkill.targetType === 'single_enemy') {
-            const alivePlayers = state.allies.filter(isAlive);
-            if (alivePlayers.length > 0) {
-                chosenTargetId = alivePlayers[Math.floor(Math.random() * alivePlayers.length)].id;
-            }
-        } else if (chosenSkill.targetType === 'self') {
-            chosenTargetId = enemy.id;
-        }
-
-        performSkill(state, config, enemy, chosenSkill, chosenTargetId);
+        performSkill(state, config, enemy, chosenPair.skill, chosenPair.targetId);
         if (checkBattleOutcome(state)) return;
     }
 

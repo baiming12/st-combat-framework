@@ -367,6 +367,7 @@ export async function initSettingsUI(deps) {
             applyStatusId: '',
             applyStatusChance: 100,
             applyStatusTarget: 'target',
+            requiredTargetStatusIds: [],
         });
         commitChange(true);
     });
@@ -446,9 +447,33 @@ export async function initSettingsUI(deps) {
                         </select>
                     </label>
                 </div>
+                <div class="stcf-skill-assign" style="margin-top:6px;">
+                    <div class="stcf-sub-label">🔒 释放前置状态（目标持有以下<strong>任意 1 个</strong>才可释放，全不勾则无限制）：</div>
+                    <div class="stcf-chips-wrap">
+                        ${(cfg.statuses || []).map(st => `
+                            <label class="stcf-chip-check">
+                                <input type="checkbox" data-skill-req-status="${escapeHtml(st.id)}" ${(sk.requiredTargetStatusIds || []).includes(st.id) ? 'checked' : ''}>
+                                <span>${escapeHtml(st.icon)} ${escapeHtml(st.name)}</span>
+                            </label>
+                        `).join('') || '<span class="stcf-muted">暂无状态</span>'}
+                    </div>
+                </div>
             </div>
         `).join('');
     }
+
+    elSkillsEditor.addEventListener('change', (e) => {
+        if (!e.target.dataset.skillReqStatus) return;
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const skill = deps.getConfig().skills[Number(card.dataset.index)];
+        if (!skill) return;
+        const set = new Set(skill.requiredTargetStatusIds || []);
+        if (e.target.checked) set.add(e.target.dataset.skillReqStatus);
+        else set.delete(e.target.dataset.skillReqStatus);
+        skill.requiredTargetStatusIds = [...set];
+        commitChange();
+    });
 
     bindSimpleListEvents(elSkillsEditor, () => deps.getConfig().skills, ['name']);
 
