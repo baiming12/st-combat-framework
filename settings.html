@@ -12,6 +12,7 @@
             <!-- 顶部分类标签页 -->
             <div class="stcf-tabs" role="tablist">
                 <button type="button" class="stcf-tab-btn active" data-tab="general">基础与导入导出</button>
+                <button type="button" class="stcf-tab-btn" data-tab="classes">职业树与成长</button>
                 <button type="button" class="stcf-tab-btn" data-tab="units">参战角色(4v4)</button>
                 <button type="button" class="stcf-tab-btn" data-tab="skills">技能库</button>
                 <button type="button" class="stcf-tab-btn" data-tab="equipments">装备库</button>
@@ -155,6 +156,16 @@
                     </div>
                 </div>
 
+                <!-- 内置世界观扩展包一键载入 -->
+                <div class="stcf-section-card">
+                    <div class="stcf-section-title">📦 一键载入内置世界观扩展包</div>
+                    <p class="stcf-help-text">内置完整<strong>「西幻」</strong>职业树（战士 / 牧师 / 法师[元素·亡灵] / 游侠 / 圣骑 / 祭司 / 野蛮人）、通用技能池、怪物技能池、西幻装备与敌人图鉴。</p>
+                    <div class="stcf-btn-group">
+                        <button type="button" id="stcf-btn-load-wf-merge" class="menu_button">🏰 增量合并「西幻」完整包（推荐）</button>
+                        <button type="button" id="stcf-btn-load-wf-replace" class="menu_button">🏰 用「西幻」完整开团预设覆盖当前方案</button>
+                    </div>
+                </div>
+
                 <!-- 配合“写卡助手”的零代码粘贴快速导入 -->
                 <div class="stcf-section-card">
                     <div class="stcf-section-title">📋 粘贴 JSON 快速导入（配合写卡助手超方便）</div>
@@ -177,6 +188,40 @@
                         <input type="file" id="stcf-file-import-json" accept=".json,application/json" class="stcf-hidden">
                     </div>
                     <div id="stcf-io-status" class="stcf-io-status"></div>
+                </div>
+            </div>
+
+            <!-- ==================== 1.5 职业树、世界观开关与自由属性点设置（v1.5 新增） ==================== -->
+            <div class="stcf-tab-pane" data-pane="classes">
+                <div class="stcf-section-card">
+                    <div class="stcf-section-title">等级成长与 5 项自由属性点收益</div>
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-prog-enabled">
+                        <span>启用等级突破、自由属性加点与职业树系统（无需经验值，由剧情修炼/MVU 或 HUD 突破升级）</span>
+                    </label>
+                    <div class="stcf-grid-3">
+                        <label class="stcf-mini-field"><span>每升 1 级获得自由点</span><input type="number" min="0" class="text_pole" id="stcf-set-pts-per-lv"></label>
+                        <label class="stcf-mini-field"><span>1点体质 → +最大HP</span><input type="number" min="1" class="text_pole" id="stcf-set-gain-vit"></label>
+                        <label class="stcf-mini-field"><span>1点力量 → +物攻ATK</span><input type="number" min="1" class="text_pole" id="stcf-set-gain-str"></label>
+                        <label class="stcf-mini-field"><span>1点精神 → +法攻SPI</span><input type="number" min="1" class="text_pole" id="stcf-set-gain-spimag"></label>
+                        <label class="stcf-mini-field"><span>1点精神 → +最大MP</span><input type="number" min="0" class="text_pole" id="stcf-set-gain-spimp"></label>
+                        <label class="stcf-mini-field"><span>1点物防 → +物防DEF</span><input type="number" min="1" class="text_pole" id="stcf-set-gain-def"></label>
+                        <label class="stcf-mini-field"><span>1点法抗 → +法抗MDEF</span><input type="number" min="1" class="text_pole" id="stcf-set-gain-mdef"></label>
+                    </div>
+                </div>
+
+                <div class="stcf-section-card">
+                    <div class="stcf-section-title">🌍 当前角色卡启用的世界观职业树与技能大组</div>
+                    <p class="stcf-help-text">勾选需要开启的世界观分类（未勾选的世界观职业不会出现在 HUD 职业面板中，防止串戏）。</p>
+                    <div id="stcf-worldviews-picker" class="stcf-chips-wrap"></div>
+                </div>
+
+                <div class="stcf-section-card">
+                    <div class="stcf-section-header">
+                        <span class="stcf-section-title">职业树节点配置（按世界观与等级解锁职业技能）</span>
+                        <button type="button" id="stcf-btn-add-class" class="menu_button stcf-sm-btn">➕ 新增职业</button>
+                    </div>
+                    <div id="stcf-classes-editor" class="stcf-editor-list"></div>
                 </div>
             </div>
 
@@ -204,13 +249,26 @@
             <div class="stcf-tab-pane" data-pane="skills">
                 <div class="stcf-section-card">
                     <div class="stcf-section-header">
-                        <span class="stcf-section-title">技能列表（实时保存）</span>
+                        <span class="stcf-section-title">技能库（大组：世界观 ｜ 小组：职业池 / 通用池 / 怪物技能池）</span>
                         <button type="button" id="stcf-btn-add-skill" class="menu_button stcf-sm-btn">➕ 新增技能</button>
+                    </div>
+                    <div class="stcf-grid-2" style="margin-bottom:8px;">
+                        <label class="stcf-mini-field"><span>按世界观大组筛选</span>
+                            <select id="stcf-filter-skill-wv" class="text_pole"></select>
+                        </label>
+                        <label class="stcf-mini-field"><span>按技能池小组筛选</span>
+                            <select id="stcf-filter-skill-pool" class="text_pole">
+                                <option value="all">全部技能池</option>
+                                <option value="class">🎓 职业技能池 (class)</option>
+                                <option value="universal">🌐 通用技能池 (universal)</option>
+                                <option value="monster">👹 怪物技能池 (monster)</option>
+                            </select>
+                        </label>
                     </div>
                     <div class="stcf-tip-box">
                         <strong>公式可用变量：</strong>
-                        <code>atk</code>、<code>def</code>、<code>hp</code>、<code>max_hp</code>、<code>gauge_a</code>、<code>gauge_b</code>、
-                        <code>target_def</code>、<code>target_hp</code>、<code>max(a,b)</code>、<code>min(a,b)</code>、<code>rand(min,max)</code>
+                        物理 <code>atk</code> / <code>target_def</code>；法术 <code>spi</code>(精神) / <code>target_mdef</code>(法抗)；
+                        以及 <code>level</code>、<code>hp</code>、<code>max_hp</code>、<code>gauge_a</code>、<code>gauge_b</code>、<code>max(a,b)</code>、<code>min(a,b)</code>、<code>rand(min,max)</code>
                     </div>
                     <div id="stcf-skills-editor" class="stcf-editor-list"></div>
                 </div>

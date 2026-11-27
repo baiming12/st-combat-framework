@@ -11,6 +11,7 @@
 import { EXTENSION_KEY, getSTContext } from './config.js';
 import {
     appendBattleLog,
+    findClassById,
     findEquipmentById,
     findSkillById,
     findStatusDefById,
@@ -18,6 +19,7 @@ import {
     getEffectiveStats,
     getUnitAvailableSkills,
     isAlive,
+    isWorldviewEnabled,
 } from './engine.js';
 
 const CONTEXT_PROMPT_KEY = `${EXTENSION_KEY}_ai_context`;
@@ -276,14 +278,18 @@ export function buildAiContextSnapshot(battleState, config) {
                 .filter(Boolean)
                 .join('、') || '无';
 
-            const skillIds = live ? getUnitAvailableSkills(live, config).map(x => x.skill.id) : (ally.skillIds || []);
+            const skillIds = live
+                ? getUnitAvailableSkills(live, config).map(x => x.skill.id)
+                : getUnitAvailableSkills({ ...ally, side: 'ally' }, config).map(x => x.skill.id);
             const skillsText = [...new Set(skillIds)]
                 .map(id => findSkillById(config, id)?.name || '')
                 .filter(Boolean)
                 .join('、') || '无';
 
+            const clsName = findClassById(config, live?.classId ?? ally.classId)?.name || '';
+            const lvTag = config.progression?.enabled ? `Lv.${live?.level ?? ally.level ?? 1}${clsName ? ` ${clsName}` : ''}` : '';
             const descNote = ally.description ? `（${ally.description}）` : '';
-            partyLines.push(`- ${ally.name}[${ally.id}]${descNote}｜装备：${equipsText}｜已学技能：${skillsText}`);
+            partyLines.push(`- ${ally.name}[${ally.id}]${lvTag ? ` ${lvTag}` : ''}${descNote}｜装备：${equipsText}｜可用技能：${skillsText}`);
         }
 
         const stockedItems = (config.items || []).filter(it => (it.quantity || 0) > 0);
@@ -304,7 +310,7 @@ export function buildAiContextSnapshot(battleState, config) {
             }).filter(Boolean).join('、') || '无';
             const aliveTag = isAlive(u) ? '' : '[已倒下]';
             const desc = u.description ? `｜简介:${u.description}` : '';
-            return `- ${u.name}${aliveTag} HP:${u.hp}/${u.maxHp} MP:${u.mp}/${u.maxMp} 攻:${eff.atk} 防:${eff.def} ${gAName}:${u.gauges?.gauge_a ?? 0}/100 ${gBName}:${u.gauges?.gauge_b ?? 0}/100｜状态:${stText}${desc}`;
+            return `- ${u.name}${aliveTag} HP:${u.hp}/${u.maxHp} MP:${u.mp}/${u.maxMp} 物攻:${eff.atk} 精神:${eff.spi} 物防:${eff.def} 法抗:${eff.mdef} ${gAName}:${u.gauges?.gauge_a ?? 0}/100 ${gBName}:${u.gauges?.gauge_b ?? 0}/100｜状态:${stText}${desc}`;
         };
 
         const battleLines = [
@@ -340,6 +346,11 @@ export function buildAiContextSnapshot(battleState, config) {
         if ((config.statuses || []).length > 0) {
             const txt = config.statuses.map(st => `${st.id}:${st.name}${st.description ? `(${st.description})` : ''}`).join('；');
             catLines.push(`- 状态/Buff库：${txt}`);
+        }
+        const enabledClasses = (config.classTrees || []).filter(c => isWorldviewEnabled(config, c.worldview));
+        if (config.progression?.enabled && enabledClasses.length > 0) {
+            const txt = enabledClasses.map(c => `${c.id}:${c.name}[${c.worldview}/Lv.${c.requiredLevel}]`).join('；');
+            catLines.push(`- 职业树：${txt}`);
         }
 
         if (catLines.length > 1) {

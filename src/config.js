@@ -97,22 +97,35 @@ export async function loadDefaultConfig() {
 }
 
 /**
- * 规范化单个角色模板
+ * 规范化单个角色模板（v1.5 新增：精神 spi、法抗 mdef、等级 level、职业 classId、自由属性点与 5 项加点）
  */
 function normalizeUnitTemplate(rawUnit, side, index) {
     const prefix = side === 'ally' ? 'ally' : 'enemy';
     const defaultId = `${prefix}_0${index + 1}`;
     const maxHp = Math.max(1, Math.round(Number(rawUnit?.maxHp ?? 100) || 100));
     const maxMp = Math.max(0, Math.round(Number(rawUnit?.maxMp ?? 50) || 0));
+    const rawAlloc = rawUnit?.allocated && typeof rawUnit.allocated === 'object' ? rawUnit.allocated : {};
     return {
         id: String(rawUnit?.id || defaultId).trim() || defaultId,
         enabled: rawUnit?.enabled !== false,
         name: String(rawUnit?.name ?? defaultId).trim() || defaultId,
         description: String(rawUnit?.description || '').trim(),
+        level: Math.max(1, Math.round(Number(rawUnit?.level ?? 1) || 1)),
+        classId: String(rawUnit?.classId || '').trim(),
+        freePoints: Math.max(0, Math.round(Number(rawUnit?.freePoints ?? 0) || 0)),
+        allocated: {
+            vit: Math.max(0, Math.round(Number(rawAlloc.vit ?? 0) || 0)),
+            str: Math.max(0, Math.round(Number(rawAlloc.str ?? 0) || 0)),
+            spi: Math.max(0, Math.round(Number(rawAlloc.spi ?? 0) || 0)),
+            def: Math.max(0, Math.round(Number(rawAlloc.def ?? 0) || 0)),
+            mdef: Math.max(0, Math.round(Number(rawAlloc.mdef ?? 0) || 0)),
+        },
         maxHp,
         maxMp,
         atk: Math.max(0, Number(rawUnit?.atk ?? 15) || 0),
+        spi: Math.max(0, Number(rawUnit?.spi ?? 15) || 0),
         def: Math.max(0, Number(rawUnit?.def ?? 5) || 0),
+        mdef: Math.max(0, Number(rawUnit?.mdef ?? 5) || 0),
         initialGaugeA: clamp(rawUnit?.initialGaugeA ?? 0, 0, 100),
         initialGaugeB: clamp(rawUnit?.initialGaugeB ?? 0, 0, 100),
         skillIds: Array.isArray(rawUnit?.skillIds) ? rawUnit.skillIds.map(String) : [],
@@ -123,12 +136,15 @@ function normalizeUnitTemplate(rawUnit, side, index) {
 }
 
 /**
- * 规范化单个技能（同时供 AI 剧情 grant_skill 事件复用）
+ * 规范化单个技能（v1.5 新增：大组世界观 worldview + 小组池 poolType: class/universal/monster）
  */
 export function normalizeSkill(sk, idx = 0) {
     const defaultId = `skill_${String(idx + 1).padStart(2, '0')}`;
+    const validPools = ['class', 'universal', 'monster'];
     return {
         id: String(sk?.id || defaultId).trim() || defaultId,
+        worldview: String(sk?.worldview || '通用').trim() || '通用',
+        poolType: validPools.includes(sk?.poolType) ? sk.poolType : 'universal',
         name: String(sk?.name ?? defaultId).trim() || defaultId,
         description: String(sk?.description || ''),
         mpCost: Math.max(0, Math.round(Number(sk?.mpCost ?? 0) || 0)),
@@ -155,7 +171,37 @@ export function normalizeSkill(sk, idx = 0) {
 }
 
 /**
- * 规范化单件装备
+ * 规范化单个职业树节点（v1.5 新增）
+ */
+export function normalizeClassNode(rawCls, idx = 0) {
+    const defaultId = `class_${String(idx + 1).padStart(2, '0')}`;
+    const unlockSkills = Array.isArray(rawCls?.unlockSkills)
+        ? rawCls.unlockSkills
+            .filter(u => u && u.skillId)
+            .map(u => ({
+                skillId: String(u.skillId).trim(),
+                level: Math.max(1, Math.round(Number(u.level ?? 1) || 1)),
+            }))
+        : [];
+    return {
+        id: String(rawCls?.id || defaultId).trim() || defaultId,
+        worldview: String(rawCls?.worldview || '通用').trim() || '通用',
+        name: String(rawCls?.name ?? defaultId).trim() || defaultId,
+        description: String(rawCls?.description || ''),
+        parentClassId: String(rawCls?.parentClassId || '').trim(),
+        requiredLevel: Math.max(1, Math.round(Number(rawCls?.requiredLevel ?? 1) || 1)),
+        bonusHp: Math.round(Number(rawCls?.bonusHp ?? 0) || 0),
+        bonusMp: Math.round(Number(rawCls?.bonusMp ?? 0) || 0),
+        bonusAtk: Math.round(Number(rawCls?.bonusAtk ?? 0) || 0),
+        bonusSpi: Math.round(Number(rawCls?.bonusSpi ?? 0) || 0),
+        bonusDef: Math.round(Number(rawCls?.bonusDef ?? 0) || 0),
+        bonusMdef: Math.round(Number(rawCls?.bonusMdef ?? 0) || 0),
+        unlockSkills,
+    };
+}
+
+/**
+ * 规范化单件装备（v1.5 新增 bonusSpi 精神加成、bonusMdef 法抗加成）
  */
 export function normalizeEquipment(rawEquip, idx = 0) {
     const defaultId = `equip_${String(idx + 1).padStart(2, '0')}`;
@@ -168,7 +214,9 @@ export function normalizeEquipment(rawEquip, idx = 0) {
         bonusHp: Math.round(Number(rawEquip?.bonusHp ?? 0) || 0),
         bonusMp: Math.round(Number(rawEquip?.bonusMp ?? 0) || 0),
         bonusAtk: Math.round(Number(rawEquip?.bonusAtk ?? 0) || 0),
+        bonusSpi: Math.round(Number(rawEquip?.bonusSpi ?? 0) || 0),
         bonusDef: Math.round(Number(rawEquip?.bonusDef ?? 0) || 0),
+        bonusMdef: Math.round(Number(rawEquip?.bonusMdef ?? 0) || 0),
         grantSkillId: String(rawEquip?.grantSkillId || ''),
         passiveStatusId: String(rawEquip?.passiveStatusId || ''),
     };
@@ -234,6 +282,33 @@ export function normalizeConfig(rawConfig, defaults) {
     general.autoEndPlayerTurn = general.autoEndPlayerTurn !== false;
     general.hudStartCollapsed = general.hudStartCollapsed !== false;
 
+    // 1.5 等级、自由加点与按世界观开关的职业树配置（v1.5 新增）
+    const baseProg = base.progression || {
+        enabled: true,
+        pointsPerLevel: 3,
+        enabledWorldviews: ['通用', '西幻'],
+        statGains: { vitHp: 15, strAtk: 2, spiMag: 2, spiMp: 8, defPhys: 2, mdefMag: 2 },
+    };
+    const rawProg = src.progression && typeof src.progression === 'object' ? src.progression : {};
+    const progression = {
+        enabled: rawProg.enabled !== undefined ? Boolean(rawProg.enabled) : baseProg.enabled,
+        pointsPerLevel: Math.max(0, Math.round(Number(rawProg.pointsPerLevel ?? baseProg.pointsPerLevel) || 0)),
+        enabledWorldviews: Array.isArray(rawProg.enabledWorldviews)
+            ? [...new Set(rawProg.enabledWorldviews.map(String).filter(Boolean))]
+            : [...baseProg.enabledWorldviews],
+        statGains: {
+            vitHp: Math.max(1, Math.round(Number(rawProg.statGains?.vitHp ?? baseProg.statGains.vitHp) || 15)),
+            strAtk: Math.max(1, Math.round(Number(rawProg.statGains?.strAtk ?? baseProg.statGains.strAtk) || 2)),
+            spiMag: Math.max(1, Math.round(Number(rawProg.statGains?.spiMag ?? baseProg.statGains.spiMag) || 2)),
+            spiMp: Math.max(0, Math.round(Number(rawProg.statGains?.spiMp ?? baseProg.statGains.spiMp) || 8)),
+            defPhys: Math.max(1, Math.round(Number(rawProg.statGains?.defPhys ?? baseProg.statGains.defPhys) || 2)),
+            mdefMag: Math.max(1, Math.round(Number(rawProg.statGains?.mdefMag ?? baseProg.statGains.mdefMag) || 2)),
+        },
+    };
+
+    const rawClasses = Array.isArray(src.classTrees) ? src.classTrees : (base.classTrees || []);
+    const classTrees = rawClasses.map((c, idx) => normalizeClassNode(c, idx));
+
     // 2. 特殊计量条定义（固定 2 个：gauge_a、gauge_b，范围 0-100，v1.2 支持每回合自动增减）
     const normalizeGaugeDef = (rawG, baseG) => ({
         ...baseG,
@@ -285,7 +360,9 @@ export function normalizeConfig(rawConfig, defaults) {
             perTurnGaugeA,
             perTurnGaugeB,
             atkMultiplier: Number.isFinite(Number(st?.atkMultiplier)) ? Number(st.atkMultiplier) : 1,
+            spiMultiplier: Number.isFinite(Number(st?.spiMultiplier)) ? Number(st.spiMultiplier) : 1,
             defMultiplier: Number.isFinite(Number(st?.defMultiplier)) ? Number(st.defMultiplier) : 1,
+            mdefMultiplier: Number.isFinite(Number(st?.mdefMultiplier)) ? Number(st.mdefMultiplier) : 1,
             duration: Math.max(1, Math.round(Number(st?.duration ?? 1) || 1)),
             onExpireStatusId: String(st?.onExpireStatusId || ''),
         };
@@ -334,9 +411,11 @@ export function normalizeConfig(rawConfig, defaults) {
     }));
 
     return {
-        schemaVersion: base.schemaVersion || 2,
+        schemaVersion: base.schemaVersion || 4,
         general,
+        progression,
         gauges,
+        classTrees,
         statuses,
         skills,
         equipments,
@@ -444,6 +523,23 @@ export function saveAsGlobalTemplate(config) {
 }
 
 /**
+ * 载入内置世界观扩展包（如西幻完整职业与技能包），纯前端 fetch，绝不硬编码在 JS 逻辑里
+ * @param {string} packFileName 例如 'western_fantasy_pack.json'
+ * @param {'merge'|'replace'} mode
+ * @param {object} currentConfig
+ * @returns {Promise<{ config: object, summary: string }>}
+ */
+export async function loadBuiltinPresetPack(packFileName, mode = 'merge', currentConfig = null) {
+    const url = new URL(`../presets/${packFileName}`, import.meta.url);
+    const resp = await fetch(url);
+    if (!resp.ok) {
+        throw new Error(`无法加载内置世界观包 (${resp.status}): ${packFileName}`);
+    }
+    const text = await resp.text();
+    return importConfigFromJsonText(text, mode, currentConfig);
+}
+
+/**
  * 恢复出厂默认配置
  * @returns {Promise<object>}
  */
@@ -539,6 +635,20 @@ export async function importConfigFromJsonText(jsonText, mode = 'replace', curre
             mergedRaw.general = { ...mergedRaw.general, ...parsed.general };
             notes.push('基础设置');
         }
+        if (parsed.progression && typeof parsed.progression === 'object') {
+            mergedRaw.progression = {
+                ...mergedRaw.progression,
+                ...parsed.progression,
+                enabledWorldviews: Array.isArray(parsed.progression.enabledWorldviews)
+                    ? [...new Set([...(mergedRaw.progression?.enabledWorldviews || []), ...parsed.progression.enabledWorldviews])]
+                    : mergedRaw.progression?.enabledWorldviews,
+                statGains: {
+                    ...(mergedRaw.progression?.statGains || {}),
+                    ...(parsed.progression.statGains || {}),
+                },
+            };
+            notes.push('成长与世界观设置');
+        }
         if (parsed.gauges && typeof parsed.gauges === 'object') {
             mergedRaw.gauges = {
                 gauge_a: { ...mergedRaw.gauges.gauge_a, ...(parsed.gauges.gauge_a || {}) },
@@ -548,6 +658,7 @@ export async function importConfigFromJsonText(jsonText, mode = 'replace', curre
         }
 
         const sections = [
+            ['classTrees', '职业树', Infinity],
             ['statuses', '状态', Infinity],
             ['skills', '技能', Infinity],
             ['equipments', '装备', Infinity],

@@ -13,12 +13,15 @@ import { applyMvuVitalsOnBattleStart } from './mvu_bridge.js';
 import {
     addEnemyToBattle,
     adjustUnitStatManual,
+    allocateStatPoint,
+    changeUnitClass,
     checkSkillPrerequisite,
     createBattleState,
     endPlayerTurn,
     equipItemOnUnit,
     executeAllyAction,
     executeUseItem,
+    findClassById,
     findEquipmentById,
     findItemById,
     findSkillById,
@@ -29,6 +32,9 @@ import {
     getUnitAvailableSkills,
     grantSkillToUnit,
     isAlive,
+    isWorldviewEnabled,
+    levelUpUnit,
+    resetUnitAllocatedPoints,
     unequipItemFromUnit,
 } from './engine.js';
 
@@ -114,7 +120,9 @@ function formatEquipBonusSummary(eq, config) {
     if (eq.bonusHp) parts.push(`HP${eq.bonusHp > 0 ? '+' : ''}${eq.bonusHp}`);
     if (eq.bonusMp) parts.push(`MP${eq.bonusMp > 0 ? '+' : ''}${eq.bonusMp}`);
     if (eq.bonusAtk) parts.push(`攻${eq.bonusAtk > 0 ? '+' : ''}${eq.bonusAtk}`);
+    if (eq.bonusSpi) parts.push(`精${eq.bonusSpi > 0 ? '+' : ''}${eq.bonusSpi}`);
     if (eq.bonusDef) parts.push(`防${eq.bonusDef > 0 ? '+' : ''}${eq.bonusDef}`);
+    if (eq.bonusMdef) parts.push(`抗${eq.bonusMdef > 0 ? '+' : ''}${eq.bonusMdef}`);
     if (eq.passiveStatusId) {
         const st = findStatusDefById(config, eq.passiveStatusId);
         if (st) parts.push(`常驻:${st.name}`);
@@ -174,6 +182,8 @@ export async function initHudUI(deps) {
     const elSkillsBar = root.querySelector('#stcf-skills-bar');
     const elItemsBar = root.querySelector('#stcf-items-bar');
     const elEquipBar = root.querySelector('#stcf-equip-bar');
+    const elGrowthBar = root.querySelector('#stcf-growth-bar');
+    const elTabGrowth = root.querySelector('#stcf-tab-growth');
     const elBtnEndTurn = root.querySelector('#stcf-btn-end-turn');
     const elBtnCopyLog = root.querySelector('#stcf-btn-copy-log');
     const elBtnFillInput = root.querySelector('#stcf-btn-fill-input');
@@ -313,7 +323,7 @@ export async function initHudUI(deps) {
         });
     });
 
-    // 切换操作标签：技能 / 道具 / 装备
+    // 切换操作标签：技能 / 道具 / 装备 / 成长职业
     root.querySelectorAll('.stcf-action-tab').forEach(btn => {
         btn.addEventListener('click', () => {
             actionTab = btn.dataset.actionTab || 'skills';
@@ -321,6 +331,7 @@ export async function initHudUI(deps) {
             elSkillsBar.classList.toggle('stcf-hidden', actionTab !== 'skills');
             elItemsBar.classList.toggle('stcf-hidden', actionTab !== 'items');
             elEquipBar.classList.toggle('stcf-hidden', actionTab !== 'equip');
+            elGrowthBar.classList.toggle('stcf-hidden', actionTab !== 'growth');
             render();
         });
     });
@@ -645,6 +656,10 @@ export async function initHudUI(deps) {
         const equipCount = (unit.equipmentIds || []).length;
         const equipBadge = equipCount > 0 ? `<span class="stcf-equip-count" title="已穿戴 ${equipCount} 件装备">🛡️${equipCount}</span>` : '';
         const autoBadge = (unit.side === 'ally' && unit.autoControl) ? '<span class="stcf-unit-tag stcf-tag-stun" title="已开启自动托管 AI">🤖托管</span>' : '';
+        const clsObj = config.progression?.enabled ? findClassById(config, unit.classId) : null;
+        const lvClassTag = config.progression?.enabled && unit.side === 'ally'
+            ? `<span class="stcf-unit-tag stcf-tag-lv">Lv.${unit.level || 1}${clsObj ? ` ${escapeHtml(clsObj.name)}` : ''}</span>`
+            : '';
 
         const gmHtml = gmMode ? `
             <div class="stcf-gm-row">
@@ -673,12 +688,13 @@ export async function initHudUI(deps) {
                 <div class="stcf-unit-top">
                     <div class="stcf-unit-name-wrap">
                         <span class="stcf-unit-name">${escapeHtml(unit.name)}</span>
+                        ${lvClassTag}
                         ${stateTag}
                         ${autoBadge}
                         ${equipBadge}
                     </div>
                     <div class="stcf-unit-top-right">
-                        <span class="stcf-unit-stats" title="实时攻击/防御（含装备与状态倍率）">攻${eff.atk} 防${eff.def}</span>
+                        <span class="stcf-unit-stats" title="实时物攻 / 精神法攻 / 物防 / 法抗">攻${eff.atk} 精${eff.spi} 防${eff.def} 抗${eff.mdef}</span>
                         ${alive ? `<button type="button" class="stcf-target-pin ${isSelectedTarget ? 'active' : ''}" data-pin-target="${escapeHtml(unit.id)}" title="设为技能/道具瞄准目标">🎯</button>` : ''}
                     </div>
                 </div>
@@ -756,23 +772,23 @@ export async function initHudUI(deps) {
             const canAct = state.phase === 'player_turn' && actor && actor.side === 'ally' && isAlive(actor) && !actor.hasActed;
             const actorAlive = state.phase === 'player_turn' && actor && actor.side === 'ally' && isAlive(actor);
 
-            // 1. 技能栏（自身技能 + 穿戴装备附带技能）
+            // 1. 技能栏（职业按等级解锁技能 + 通用/自身技能 + 穿戴装备附带技能）
             const availSkills = actor ? getUnitAvailableSkills(actor, config) : [];
             if (availSkills.length === 0) {
-                elSkillsBar.innerHTML = '<span class="stcf-muted">该角色尚未配置技能，请到扩展设置中勾选。</span>';
+                elSkillsBar.innerHTML = '<span class="stcf-muted">该角色尚未配置技能，请到「成长/职业」或扩展设置中添加。</span>';
             } else {
-                elSkillsBar.innerHTML = availSkills.map(({ skill: sk, fromEquipmentName }) => {
+                elSkillsBar.innerHTML = availSkills.map(({ skill: sk, fromEquipmentName, fromClassName }) => {
                     const lackMp = actor && actor.mp < sk.mpCost;
                     const preCheck = actor ? checkSkillPrerequisite(state, config, actor, sk, state.selectedTargetId) : { ok: true };
                     const disabled = !canAct || lackMp || !preCheck.ok;
                     const typeBadge = TARGET_TYPE_BADGES[sk.targetType] || '';
-                    const equipTag = fromEquipmentName ? ` · 🛡️${fromEquipmentName}` : '';
+                    const srcTag = fromEquipmentName ? ` · 🛡️${fromEquipmentName}` : (fromClassName ? ` · 🎓${fromClassName}` : '');
                     const lockTag = !preCheck.ok ? ' · 🔒需前置状态' : '';
                     const tip = `${sk.description || sk.name}｜消耗 ${sk.mpCost} MP｜公式：${sk.formula}${!preCheck.ok ? `｜⚠️ ${preCheck.reason}` : ''}`;
                     return `
                         <button type="button" class="stcf-skill-btn" data-skill-id="${escapeHtml(sk.id)}" ${disabled ? 'disabled' : ''} title="${escapeHtml(tip)}">
                             <span class="stcf-skill-name">${!preCheck.ok ? '🔒 ' : ''}${escapeHtml(sk.name)}</span>
-                            <span class="stcf-skill-meta">${typeBadge}${sk.mpCost > 0 ? ` · ${sk.mpCost}MP` : ''}${escapeHtml(equipTag)}${lockTag}</span>
+                            <span class="stcf-skill-meta">${typeBadge}${sk.mpCost > 0 ? ` · ${sk.mpCost}MP` : ''}${escapeHtml(srcTag)}${lockTag}</span>
                         </button>
                     `;
                 }).join('');
@@ -823,6 +839,83 @@ export async function initHudUI(deps) {
                         </div>
                     `;
                 }).join('');
+            }
+
+            // 4. 成长 / 自由加点 / 职业树 / 通用技能池（v1.5 新增）
+            const progOn = config.progression?.enabled !== false;
+            elTabGrowth.classList.toggle('stcf-hidden', !progOn);
+            if (progOn && actor && actor.side === 'ally') {
+                const freePts = Number(actor.freePoints) || 0;
+                elTabGrowth.textContent = freePts > 0 ? `⬆️ 成长(+${freePts})` : '⬆️ 成长/职业';
+                const gains = config.progression?.statGains || { vitHp: 15, strAtk: 2, spiMag: 2, spiMp: 8, defPhys: 2, mdefMag: 2 };
+                const alloc = actor.allocated || { vit: 0, str: 0, spi: 0, def: 0, mdef: 0 };
+                const statDefs = [
+                    ['vit', '体质', `+${gains.vitHp}HP`],
+                    ['str', '力量', `+${gains.strAtk}物攻`],
+                    ['spi', '精神', `+${gains.spiMag}法攻/+${gains.spiMp}MP`],
+                    ['def', '物防', `+${gains.defPhys}物防`],
+                    ['mdef', '法抗', `+${gains.mdefMag}法抗`],
+                ];
+                const enabledClasses = (config.classTrees || []).filter(c => isWorldviewEnabled(config, c.worldview));
+                const curClass = findClassById(config, actor.classId);
+                const curLv = actor.level || 1;
+
+                const unlockPreview = curClass
+                    ? (curClass.unlockSkills || []).map(u => {
+                        const skName = findSkillById(config, u.skillId)?.name || u.skillId;
+                        const ok = curLv >= u.level;
+                        return `<span class="stcf-status-chip ${ok ? 'stcf-chip-equip' : ''}">Lv.${u.level} ${escapeHtml(skName)} ${ok ? '✅' : '🔒'}</span>`;
+                    }).join('')
+                    : '<span class="stcf-muted">未选择职业</span>';
+
+                const universalSkills = (config.skills || []).filter(s => s.poolType === 'universal' && isWorldviewEnabled(config, s.worldview));
+
+                elGrowthBar.innerHTML = `
+                    <div class="stcf-growth-top">
+                        <span><strong>${escapeHtml(actor.name)}</strong> · Lv.<strong>${curLv}</strong> · 剩余自由点：<strong style="color:#ffd166">${freePts}</strong></span>
+                        <div class="stcf-event-actions">
+                            <button type="button" class="stcf-btn stcf-btn-primary stcf-btn-sm" data-growth-act="level_up">⬆️ 修炼升级(+1级)</button>
+                            <button type="button" class="stcf-btn stcf-btn-sm" data-growth-act="reset_pts">🔄 洗点</button>
+                        </div>
+                    </div>
+                    <div class="stcf-alloc-grid">
+                        ${statDefs.map(([key, label, hint]) => `
+                            <div class="stcf-alloc-cell">
+                                <span>${label} <b>${alloc[key] || 0}</b> <small class="stcf-muted">(${hint})</small></span>
+                                <button type="button" class="stcf-btn stcf-btn-sm stcf-btn-primary" data-alloc-stat="${key}" ${freePts <= 0 ? 'disabled' : ''}>+</button>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="stcf-growth-class">
+                        <div class="stcf-growth-top">
+                            <span>🎓 职业树切换：</span>
+                            <select class="stcf-hud-select" id="stcf-hud-class-select">
+                                <option value="">无职业</option>
+                                ${enabledClasses.map(c => {
+                                    const parentName = c.parentClassId ? (findClassById(config, c.parentClassId)?.name || '') : '';
+                                    const label = `[${c.worldview}] ${parentName ? `${parentName}→` : ''}${c.name} (Lv.${c.requiredLevel})`;
+                                    const locked = curLv < c.requiredLevel;
+                                    return `<option value="${escapeHtml(c.id)}" ${actor.classId === c.id ? 'selected' : ''} ${locked ? 'disabled' : ''}>${escapeHtml(label)}${locked ? ' 🔒' : ''}</option>`;
+                                }).join('')}
+                            </select>
+                        </div>
+                        <div class="stcf-statuses-row">${unlockPreview}</div>
+                    </div>
+                    <div class="stcf-growth-univ">
+                        <div class="stcf-muted" style="margin-bottom:3px;">🌐 通用技能池（勾选即可自由装备给当前角色）：</div>
+                        <div class="stcf-chips-wrap">
+                            ${universalSkills.map(sk => `
+                                <label class="stcf-chip-check">
+                                    <input type="checkbox" data-hud-univ-skill="${escapeHtml(sk.id)}" ${(actor.skillIds || []).includes(sk.id) ? 'checked' : ''}>
+                                    <span>${escapeHtml(sk.name)}</span>
+                                </label>
+                            `).join('') || '<span class="stcf-muted">暂无启用的通用技能</span>'}
+                        </div>
+                    </div>
+                `;
+            } else {
+                elTabGrowth.textContent = '⬆️ 成长/职业';
+                elGrowthBar.innerHTML = '<span class="stcf-muted">请先选择一名我方角色。</span>';
             }
 
             elBtnEndTurn.disabled = state.phase !== 'player_turn';
@@ -924,6 +1017,74 @@ export async function initHudUI(deps) {
         deps.onStateMutated();
         showToast(act === 'unequip' ? '已卸下装备' : '🛡️ 已穿戴装备并同步属性/常驻 Buff');
         await dispatchNewLogs(res.newLogs);
+    });
+
+    // 成长/加点/职业树/通用技能池交互（v1.5）
+    elGrowthBar.addEventListener('click', (e) => {
+        const state = deps.getBattleState();
+        const config = deps.getConfig();
+        if (!state || !state.active) return;
+
+        const allocBtn = e.target.closest('[data-alloc-stat]');
+        if (allocBtn) {
+            const res = allocateStatPoint(state, config, state.selectedActorId, allocBtn.dataset.allocStat);
+            if (!res.ok) { showToast(`⚠️ ${res.message}`); return; }
+            saveConfig(config);
+            deps.onConfigMutated?.();
+            deps.onStateMutated();
+            return;
+        }
+
+        const actBtn = e.target.closest('[data-growth-act]');
+        if (actBtn) {
+            const act = actBtn.dataset.growthAct;
+            if (act === 'level_up') {
+                const res = levelUpUnit(state, config, state.selectedActorId, 1);
+                if (!res.ok) { showToast(`⚠️ ${res.message}`); return; }
+                saveConfig(config);
+                deps.onConfigMutated?.();
+                deps.onStateMutated();
+                showToast(`⬆️ 突破至 Lv.${res.level}，获得 ${res.gainedPts} 点自由属性点！`);
+            } else if (act === 'reset_pts') {
+                const res = resetUnitAllocatedPoints(state, config, state.selectedActorId);
+                if (!res.ok) { showToast(`⚠️ ${res.message}`); return; }
+                saveConfig(config);
+                deps.onConfigMutated?.();
+                deps.onStateMutated();
+                showToast(`🔄 已洗点，返还 ${res.refunded} 点自由属性点`);
+            }
+        }
+    });
+
+    elGrowthBar.addEventListener('change', (e) => {
+        const state = deps.getBattleState();
+        const config = deps.getConfig();
+        if (!state || !state.active) return;
+
+        if (e.target.id === 'stcf-hud-class-select') {
+            const res = changeUnitClass(state, config, state.selectedActorId, e.target.value);
+            if (!res.ok) { showToast(`⚠️ ${res.message}`); render(); return; }
+            saveConfig(config);
+            deps.onConfigMutated?.();
+            deps.onStateMutated();
+            showToast('🎓 职业已变更，对应职业技能已同步！');
+            return;
+        }
+
+        if (e.target.dataset.hudUnivSkill) {
+            const sid = e.target.dataset.hudUnivSkill;
+            const live = (state.allies || []).find(a => a.id === state.selectedActorId);
+            const tpl = (config.allies || []).find(a => a.id === state.selectedActorId);
+            if (!live || !tpl) return;
+            const set = new Set(tpl.skillIds || []);
+            if (e.target.checked) set.add(sid);
+            else set.delete(sid);
+            tpl.skillIds = [...set];
+            live.skillIds = [...set];
+            saveConfig(config);
+            deps.onConfigMutated?.();
+            deps.onStateMutated();
+        }
     });
 
     setCollapsed(isCollapsed);

@@ -12,7 +12,7 @@
  */
 
 import { clamp, deepClone, getSTContext } from './config.js';
-import { findEquipmentById, findItemById, findSkillById, findStatusDefById, syncUnitEquipmentEffects } from './engine.js';
+import { findClassById, findEquipmentById, findItemById, findSkillById, findStatusDefById, syncUnitEquipmentEffects } from './engine.js';
 
 /**
  * 将 MVU 里的 statuses 数组解析为合法的普通临时状态列表
@@ -276,6 +276,69 @@ export function pullFromMvuZod(config, battleState) {
             const tpl = (config.allies || []).find(a => a.id === allyId);
             const live = battleState?.active ? (battleState.allies || []).find(a => a.id === allyId) : null;
 
+            // v1.5：同步等级（若剧情修炼使等级提升且 MVU 未手动增加 freePoints，则自动补发每级自由属性点）、职业与自由加点
+            let autoAwardedPoints = false;
+            if (tpl && Number.isFinite(Number(mvuAlly.level))) {
+                const nextLv = Math.max(1, Math.round(Number(mvuAlly.level)));
+                const prevLv = Math.max(1, Number(tpl.level) || 1);
+                if (nextLv !== prevLv) {
+                    const prevFree = Number(tpl.freePoints) || 0;
+                    const mvuFreeProvided = Number.isFinite(Number(mvuAlly.freePoints));
+                    const mvuFreeVal = mvuFreeProvided ? Math.max(0, Math.round(Number(mvuAlly.freePoints))) : prevFree;
+                    tpl.level = nextLv;
+                    // 若等级提高且 MVU 里的 freePoints 没跟着涨，自动按每级自由点补发
+                    if (nextLv > prevLv && (!mvuFreeProvided || mvuFreeVal === prevFree)) {
+                        const ptsPerLv = Math.max(0, Math.round(Number(config?.progression?.pointsPerLevel ?? 3) || 0));
+                        tpl.freePoints = prevFree + (nextLv - prevLv) * ptsPerLv;
+                        autoAwardedPoints = true;
+                    }
+                    if (live) {
+                        live.level = tpl.level;
+                        live.freePoints = tpl.freePoints;
+                        syncUnitEquipmentEffects(live, config, false);
+                    }
+                    changed = true;
+                    notes.push(`${tpl.name}Lv.${nextLv}`);
+                }
+            }
+            if (tpl && !autoAwardedPoints && Number.isFinite(Number(mvuAlly.freePoints))) {
+                const mvuFree = Math.max(0, Math.round(Number(mvuAlly.freePoints)));
+                if (mvuFree !== (Number(tpl.freePoints) || 0)) {
+                    tpl.freePoints = mvuFree;
+                    if (live) live.freePoints = mvuFree;
+                    changed = true;
+                }
+            }
+            if (tpl && typeof mvuAlly.classId === 'string') {
+                const nextCls = mvuAlly.classId.trim();
+                if ((!nextCls || findClassById(config, nextCls)) && tpl.classId !== nextCls) {
+                    tpl.classId = nextCls;
+                    if (live) {
+                        live.classId = nextCls;
+                        syncUnitEquipmentEffects(live, config, false);
+                    }
+                    changed = true;
+                    notes.push(`${tpl.name}职业`);
+                }
+            }
+            if (tpl && mvuAlly.allocated && typeof mvuAlly.allocated === 'object') {
+                const nextAlloc = {
+                    vit: Math.max(0, Math.round(Number(mvuAlly.allocated.vit ?? 0) || 0)),
+                    str: Math.max(0, Math.round(Number(mvuAlly.allocated.str ?? 0) || 0)),
+                    spi: Math.max(0, Math.round(Number(mvuAlly.allocated.spi ?? 0) || 0)),
+                    def: Math.max(0, Math.round(Number(mvuAlly.allocated.def ?? 0) || 0)),
+                    mdef: Math.max(0, Math.round(Number(mvuAlly.allocated.mdef ?? 0) || 0)),
+                };
+                if (JSON.stringify(tpl.allocated || {}) !== JSON.stringify(nextAlloc)) {
+                    tpl.allocated = nextAlloc;
+                    if (live) {
+                        live.allocated = { ...nextAlloc };
+                        syncUnitEquipmentEffects(live, config, false);
+                    }
+                    changed = true;
+                }
+            }
+
             // 同步穿戴装备（仅采纳装备库里存在的合法 ID）
             if (Array.isArray(mvuAlly.equipmentIds)) {
                 const validEquips = [...new Set(mvuAlly.equipmentIds.map(String).filter(id => Boolean(findEquipmentById(config, id))))];
@@ -459,6 +522,10 @@ export async function pushToMvuZod(config, battleState, options = {}) {
         const prevAlly = nextAllies[tpl.id] || {};
         const allyRecord = {
             ...prevAlly,
+            level: live ? (live.level || 1) : (tpl.level || 1),
+            classId: live ? (live.classId || '') : (tpl.classId || ''),
+            freePoints: live ? (live.freePoints || 0) : (tpl.freePoints || 0),
+            allocated: deepClone(live ? (live.allocated || tpl.allocated) : (tpl.allocated || { vit: 0, str: 0, spi: 0, def: 0, mdef: 0 })),
             hp: live ? live.hp : (Number.isFinite(Number(prevAlly.hp)) ? prevAlly.hp : tpl.maxHp),
             mp: live ? live.mp : (Number.isFinite(Number(prevAlly.mp)) ? prevAlly.mp : tpl.maxMp),
             gauge_a: live ? (live.gauges?.gauge_a ?? 0) : (Number.isFinite(Number(prevAlly.gauge_a)) ? prevAlly.gauge_a : tpl.initialGaugeA),

@@ -1,5 +1,5 @@
 {
-    "schemaVersion": 3,
+    "schemaVersion": 4,
     "general": {
         "enabled": true,
         "usePerCharacterConfig": true,
@@ -17,6 +17,22 @@
         "hudStartCollapsed": true,
         "logHeaderTemplate": "【第 {{turn}} 回合战斗记录】",
         "actionLogPrefix": "- "
+    },
+    "progression": {
+        "enabled": true,
+        "pointsPerLevel": 3,
+        "enabledWorldviews": [
+            "通用",
+            "西幻"
+        ],
+        "statGains": {
+            "vitHp": 15,
+            "strAtk": 2,
+            "spiMag": 2,
+            "spiMp": 8,
+            "defPhys": 2,
+            "mdefMag": 2
+        }
     },
     "gauges": {
         "gauge_a": {
@@ -36,6 +52,46 @@
             "perTurnScope": "all"
         }
     },
+    "classTrees": [
+        {
+            "id": "class_base_01",
+            "worldview": "通用",
+            "name": "通用前卫",
+            "description": "均衡型物理前排基础职业",
+            "parentClassId": "",
+            "requiredLevel": 1,
+            "bonusHp": 15,
+            "bonusMp": 0,
+            "bonusAtk": 3,
+            "bonusSpi": 0,
+            "bonusDef": 2,
+            "bonusMdef": 0,
+            "unlockSkills": [
+                { "skillId": "skill_01", "level": 1 },
+                { "skillId": "skill_02", "level": 2 },
+                { "skillId": "skill_06", "level": 3 }
+            ]
+        },
+        {
+            "id": "class_base_02",
+            "worldview": "通用",
+            "name": "通用术士",
+            "description": "擅长精神法术伤害与支援的基础职业",
+            "parentClassId": "",
+            "requiredLevel": 1,
+            "bonusHp": 0,
+            "bonusMp": 20,
+            "bonusAtk": 0,
+            "bonusSpi": 4,
+            "bonusDef": 0,
+            "bonusMdef": 3,
+            "unlockSkills": [
+                { "skillId": "skill_03", "level": 1 },
+                { "skillId": "skill_04", "level": 2 },
+                { "skillId": "skill_05", "level": 3 }
+            ]
+        }
+    ],
     "statuses": [
         {
             "id": "debuff_01",
@@ -48,7 +104,9 @@
             "perTurnGaugeA": 5,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1,
+            "spiMultiplier": 1,
             "defMultiplier": 1,
+            "mdefMultiplier": 1,
             "duration": 3,
             "onExpireStatusId": ""
         },
@@ -63,22 +121,26 @@
             "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1,
+            "spiMultiplier": 1,
             "defMultiplier": 1,
+            "mdefMultiplier": 1,
             "duration": 1,
             "onExpireStatusId": ""
         },
         {
             "id": "buff_01",
-            "name": "攻击强化",
+            "name": "攻势强化",
             "icon": "⚔️",
-            "description": "攻击力提升 30%",
+            "description": "物理攻击与精神法攻均提升 30%",
             "skipTurn": false,
             "perTurnHp": 0,
             "perTurnMp": 0,
             "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1.3,
+            "spiMultiplier": 1.3,
             "defMultiplier": 1,
+            "mdefMultiplier": 1,
             "duration": 3,
             "onExpireStatusId": ""
         },
@@ -86,14 +148,16 @@
             "id": "debuff_03",
             "name": "防御削弱",
             "icon": "🛡️",
-            "description": "防御力降低 30%，且每回合增加状态槽A",
+            "description": "物防与法抗降低 30%，且每回合增加状态槽A",
             "skipTurn": false,
             "perTurnHp": 0,
             "perTurnMp": 0,
             "perTurnGaugeA": 10,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1,
+            "spiMultiplier": 1,
             "defMultiplier": 0.7,
+            "mdefMultiplier": 0.7,
             "duration": 2,
             "onExpireStatusId": ""
         },
@@ -101,14 +165,16 @@
             "id": "buff_02",
             "name": "警戒守护",
             "icon": "🧢",
-            "description": "防御力提升 20%，每回合回复 5 点 MP",
+            "description": "物防与法抗提升 20%，每回合回复 5 点 MP",
             "skipTurn": false,
             "perTurnHp": 0,
             "perTurnMp": 5,
             "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1,
+            "spiMultiplier": 1,
             "defMultiplier": 1.2,
+            "mdefMultiplier": 1.2,
             "duration": 3,
             "onExpireStatusId": ""
         },
@@ -116,14 +182,16 @@
             "id": "buff_03",
             "name": "过载爆发",
             "icon": "⚡",
-            "description": "攻击力提升 50%、防御力降低 20%；定时触发结束时会转化为「力竭」",
+            "description": "物攻与精神提升 50%、物防与法抗降低 20%；定时触发结束时会转化为「力竭」",
             "skipTurn": false,
             "perTurnHp": 0,
             "perTurnMp": 0,
             "perTurnGaugeA": 0,
             "perTurnGaugeB": 0,
             "atkMultiplier": 1.5,
+            "spiMultiplier": 1.5,
             "defMultiplier": 0.8,
+            "mdefMultiplier": 0.8,
             "duration": 2,
             "onExpireStatusId": "debuff_04"
         },
@@ -131,14 +199,16 @@
             "id": "debuff_04",
             "name": "力竭",
             "icon": "😮‍💨",
-            "description": "爆发结束后的脱力状态：攻击与防御均降低 20%，每回合降低状态槽A",
+            "description": "爆发结束后的脱力状态：攻防与精神法抗均降低 20%，每回合降低状态槽A",
             "skipTurn": false,
             "perTurnHp": 0,
             "perTurnMp": -5,
             "perTurnGaugeA": -15,
             "perTurnGaugeB": 0,
             "atkMultiplier": 0.8,
+            "spiMultiplier": 0.8,
             "defMultiplier": 0.8,
+            "mdefMultiplier": 0.8,
             "duration": 2,
             "onExpireStatusId": ""
         }
@@ -146,8 +216,10 @@
     "skills": [
         {
             "id": "skill_01",
+            "worldview": "通用",
+            "poolType": "universal",
             "name": "基础攻击",
-            "description": "对单体敌方造成基础伤害",
+            "description": "对单体敌方造成基础物理伤害",
             "mpCost": 0,
             "targetType": "single_enemy",
             "effectType": "damage",
@@ -159,13 +231,16 @@
             "applyStatusId": "",
             "applyStatusChance": 100,
             "applyStatusTarget": "target",
+            "requiredTargetStatusIds": [],
             "aiPriority": 10,
             "aiHpBelowPercent": 100
         },
         {
             "id": "skill_02",
+            "worldview": "通用",
+            "poolType": "class",
             "name": "重击技能",
-            "description": "消耗体力造成高额伤害，并有概率附加持续损耗状态",
+            "description": "消耗体力造成高额物理伤害，并有概率附加持续损耗",
             "mpCost": 15,
             "targetType": "single_enemy",
             "effectType": "damage",
@@ -177,17 +252,20 @@
             "applyStatusId": "debuff_01",
             "applyStatusChance": 80,
             "applyStatusTarget": "target",
+            "requiredTargetStatusIds": [],
             "aiPriority": 40,
             "aiHpBelowPercent": 100
         },
         {
             "id": "skill_03",
-            "name": "范围冲击",
-            "description": "攻击全体敌方单位，并有概率造成行动受限",
+            "worldview": "通用",
+            "poolType": "class",
+            "name": "精神冲击",
+            "description": "以精神属性对全体敌方造成法术伤害，并有概率控制",
             "mpCost": 25,
             "targetType": "all_enemies",
             "effectType": "damage",
-            "formula": "max(1, atk * 1.1 - target_def * 0.4)",
+            "formula": "max(1, spi * 1.25 - target_mdef * 0.4)",
             "selfGaugeAChange": 0,
             "selfGaugeBChange": 15,
             "targetGaugeAChange": 10,
@@ -195,17 +273,20 @@
             "applyStatusId": "debuff_02",
             "applyStatusChance": 50,
             "applyStatusTarget": "target",
+            "requiredTargetStatusIds": [],
             "aiPriority": 55,
             "aiHpBelowPercent": 100
         },
         {
             "id": "skill_04",
+            "worldview": "通用",
+            "poolType": "universal",
             "name": "应急回复",
-            "description": "回复单体友方生命值并降低状态槽A",
+            "description": "按精神属性回复单体友方生命值并降低状态槽A",
             "mpCost": 15,
             "targetType": "single_ally",
             "effectType": "heal",
-            "formula": "max(10, atk * 1.2 + 15)",
+            "formula": "max(15, spi * 1.4 + 15)",
             "selfGaugeAChange": 0,
             "selfGaugeBChange": 0,
             "targetGaugeAChange": -15,
@@ -213,13 +294,16 @@
             "applyStatusId": "",
             "applyStatusChance": 100,
             "applyStatusTarget": "target",
+            "requiredTargetStatusIds": [],
             "aiPriority": 80,
             "aiHpBelowPercent": 65
         },
         {
             "id": "skill_05",
+            "worldview": "通用",
+            "poolType": "class",
             "name": "战术增益",
-            "description": "为全体友方附加攻击强化状态",
+            "description": "为全体友方附加攻势强化状态",
             "mpCost": 20,
             "targetType": "all_allies",
             "effectType": "utility",
@@ -237,8 +321,10 @@
         },
         {
             "id": "skill_06",
+            "worldview": "通用",
+            "poolType": "class",
             "name": "异常追击",
-            "description": "前置条件示例：仅当目标处于「持续损耗 / 行动受限 / 防御削弱」任意一种状态时才可释放，造成高额追击伤害",
+            "description": "仅目标持有持续损耗/行动受限/防御削弱之一时可释放的高伤追击",
             "mpCost": 10,
             "targetType": "single_enemy",
             "effectType": "damage",
@@ -260,8 +346,10 @@
         },
         {
             "id": "skill_enemy_01",
+            "worldview": "通用",
+            "poolType": "monster",
             "name": "敌方普攻",
-            "description": "敌方基础攻击",
+            "description": "敌方基础物理攻击",
             "mpCost": 0,
             "targetType": "single_enemy",
             "effectType": "damage",
@@ -273,11 +361,14 @@
             "applyStatusId": "",
             "applyStatusChance": 100,
             "applyStatusTarget": "target",
+            "requiredTargetStatusIds": [],
             "aiPriority": 10,
             "aiHpBelowPercent": 100
         },
         {
             "id": "skill_enemy_02",
+            "worldview": "通用",
+            "poolType": "monster",
             "name": "敌方强袭",
             "description": "敌方消耗体力发动强袭并附加防御削弱",
             "mpCost": 15,
@@ -291,6 +382,7 @@
             "applyStatusId": "debuff_03",
             "applyStatusChance": 70,
             "applyStatusTarget": "target",
+            "requiredTargetStatusIds": [],
             "aiPriority": 50,
             "aiHpBelowPercent": 100
         }
@@ -300,11 +392,13 @@
             "id": "equip_01",
             "name": "制式短刃",
             "slot": "weapon",
-            "description": "提升基础攻击力的常规武器",
+            "description": "提升基础物理攻击力的常规武器",
             "bonusHp": 0,
             "bonusMp": 0,
             "bonusAtk": 6,
+            "bonusSpi": 0,
             "bonusDef": 0,
+            "bonusMdef": 0,
             "grantSkillId": "",
             "passiveStatusId": ""
         },
@@ -312,11 +406,13 @@
             "id": "equip_02",
             "name": "战术护帽",
             "slot": "head",
-            "description": "提升防御并附带常驻「警戒守护」增益状态",
+            "description": "提升双抗并附带常驻「警戒守护」增益状态",
             "bonusHp": 10,
             "bonusMp": 0,
             "bonusAtk": 0,
+            "bonusSpi": 2,
             "bonusDef": 4,
+            "bonusMdef": 4,
             "grantSkillId": "",
             "passiveStatusId": "buff_02"
         },
@@ -324,11 +420,13 @@
             "id": "equip_03",
             "name": "战术增幅饰章",
             "slot": "accessory",
-            "description": "增加 MP 上限并附带可使用「战术增益」技能",
+            "description": "增加 MP 与精神，并附带可使用「战术增益」技能",
             "bonusHp": 0,
             "bonusMp": 20,
             "bonusAtk": 2,
+            "bonusSpi": 5,
             "bonusDef": 1,
+            "bonusMdef": 3,
             "grantSkillId": "skill_05",
             "passiveStatusId": ""
         }
@@ -386,40 +484,52 @@
             "enabled": true,
             "name": "我方角色A",
             "description": "均衡型前排主力，擅长正面输出与连招追击",
+            "level": 1,
+            "classId": "class_base_01",
+            "freePoints": 3,
+            "allocated": { "vit": 0, "str": 0, "spi": 0, "def": 0, "mdef": 0 },
             "maxHp": 120,
             "maxMp": 60,
             "atk": 24,
+            "spi": 18,
             "def": 10,
+            "mdef": 8,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
             "skillIds": [
                 "skill_01",
-                "skill_02",
-                "skill_03",
-                "skill_04",
-                "skill_06"
+                "skill_04"
             ],
             "equipmentIds": [
                 "equip_01"
-            ]
+            ],
+            "aiStrategy": "priority",
+            "autoControl": false
         },
         {
             "id": "ally_02",
             "enabled": false,
             "name": "我方角色B",
-            "description": "支援型同伴，擅长治疗与团队增益",
+            "description": "支援型同伴，擅长精神法术治疗与团队增益",
+            "level": 1,
+            "classId": "class_base_02",
+            "freePoints": 3,
+            "allocated": { "vit": 0, "str": 0, "spi": 0, "def": 0, "mdef": 0 },
             "maxHp": 100,
             "maxMp": 80,
-            "atk": 20,
+            "atk": 14,
+            "spi": 26,
             "def": 8,
+            "mdef": 12,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
             "skillIds": [
                 "skill_01",
-                "skill_04",
-                "skill_05"
+                "skill_04"
             ],
-            "equipmentIds": []
+            "equipmentIds": [],
+            "aiStrategy": "priority",
+            "autoControl": false
         }
     ],
     "enemies": [
@@ -427,34 +537,50 @@
             "id": "enemy_01",
             "enabled": true,
             "name": "敌方目标A",
-            "description": "常规重装敌方单位，擅长强袭并削弱目标防御",
+            "description": "常规重装敌方单位，擅长强袭并削弱目标双抗",
+            "level": 1,
+            "classId": "",
+            "freePoints": 0,
+            "allocated": { "vit": 0, "str": 0, "spi": 0, "def": 0, "mdef": 0 },
             "maxHp": 150,
             "maxMp": 60,
             "atk": 22,
+            "spi": 14,
             "def": 8,
+            "mdef": 6,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
             "skillIds": [
                 "skill_enemy_01",
                 "skill_enemy_02"
             ],
-            "equipmentIds": []
+            "equipmentIds": [],
+            "aiStrategy": "priority",
+            "autoControl": false
         },
         {
             "id": "enemy_02",
             "enabled": false,
             "name": "敌方目标B",
             "description": "轻型快速敌方单位，以高频普通攻击为主",
+            "level": 1,
+            "classId": "",
+            "freePoints": 0,
+            "allocated": { "vit": 0, "str": 0, "spi": 0, "def": 0, "mdef": 0 },
             "maxHp": 110,
             "maxMp": 50,
             "atk": 18,
+            "spi": 12,
             "def": 6,
+            "mdef": 6,
             "initialGaugeA": 0,
             "initialGaugeB": 0,
             "skillIds": [
                 "skill_enemy_01"
             ],
-            "equipmentIds": []
+            "equipmentIds": [],
+            "aiStrategy": "priority",
+            "autoControl": false
         }
     ],
     "triggerRules": [

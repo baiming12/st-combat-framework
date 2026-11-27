@@ -190,6 +190,100 @@ export function findItemById(config, itemId) {
     return (config?.items || []).find(it => it.id === itemId);
 }
 
+export function findClassById(config, classId) {
+    if (!classId) return null;
+    return (config?.classTrees || []).find(c => c.id === classId) || null;
+}
+
+/**
+ * 获取职业的继承链 [1阶父职业, ..., 当前职业]（带防环保护）
+ * @param {object} config
+ * @param {string} classId
+ * @returns {Array<object>}
+ */
+export function getClassLineage(config, classId) {
+    const chain = [];
+    const visited = new Set();
+    let cur = findClassById(config, classId);
+    while (cur && !visited.has(cur.id)) {
+        visited.add(cur.id);
+        chain.unshift(cur);
+        cur = cur.parentClassId ? findClassById(config, cur.parentClassId) : null;
+    }
+    return chain;
+}
+
+/**
+ * 判断某个职业所属世界观当前是否已开启
+ */
+export function isWorldviewEnabled(config, worldview) {
+    const enabled = config?.progression?.enabledWorldviews;
+    if (!Array.isArray(enabled) || enabled.length === 0) return true;
+    return enabled.includes(worldview);
+}
+
+/**
+ * 计算单位的自由属性加点 + 当前职业被动加成 + 职业按等级解锁的技能列表
+ */
+export function getUnitProgressionBonuses(unit, config) {
+    const empty = {
+        bonusHp: 0,
+        bonusMp: 0,
+        bonusAtk: 0,
+        bonusSpi: 0,
+        bonusDef: 0,
+        bonusMdef: 0,
+        unlockedSkills: [],
+        className: '',
+    };
+    if (!unit || !config?.progression?.enabled) return empty;
+
+    const gains = config.progression.statGains || {
+        vitHp: 15, strAtk: 2, spiMag: 2, spiMp: 8, defPhys: 2, mdefMag: 2,
+    };
+    const alloc = unit.allocated || {};
+    const vit = Math.max(0, Number(alloc.vit) || 0);
+    const str = Math.max(0, Number(alloc.str) || 0);
+    const spi = Math.max(0, Number(alloc.spi) || 0);
+    const def = Math.max(0, Number(alloc.def) || 0);
+    const mdef = Math.max(0, Number(alloc.mdef) || 0);
+
+    let bonusHp = vit * (gains.vitHp || 15);
+    let bonusMp = spi * (gains.spiMp || 8);
+    let bonusAtk = str * (gains.strAtk || 2);
+    let bonusSpi = spi * (gains.spiMag || 2);
+    let bonusDef = def * (gains.defPhys || 2);
+    let bonusMdef = mdef * (gains.mdefMag || 2);
+
+    const unlockedSkills = [];
+    const level = Math.max(1, Number(unit.level) || 1);
+    const curClass = findClassById(config, unit.classId);
+    let className = '';
+
+    if (curClass && isWorldviewEnabled(config, curClass.worldview)) {
+        className = curClass.name;
+        // 职业被动取当前职业节点本身的属性加成
+        bonusHp += Number(curClass.bonusHp || 0);
+        bonusMp += Number(curClass.bonusMp || 0);
+        bonusAtk += Number(curClass.bonusAtk || 0);
+        bonusSpi += Number(curClass.bonusSpi || 0);
+        bonusDef += Number(curClass.bonusDef || 0);
+        bonusMdef += Number(curClass.bonusMdef || 0);
+
+        // 进阶职业自动继承父职业链上已达等级解锁的技能
+        const lineage = getClassLineage(config, curClass.id);
+        for (const clsNode of lineage) {
+            for (const entry of clsNode.unlockSkills || []) {
+                if (level >= (Number(entry.level) || 1) && entry.skillId) {
+                    unlockedSkills.push({ skillId: entry.skillId, className: clsNode.name });
+                }
+            }
+        }
+    }
+
+    return { bonusHp, bonusMp, bonusAtk, bonusSpi, bonusDef, bonusMdef, unlockedSkills, className };
+}
+
 export function isAlive(unit) {
     return Boolean(unit && unit.hp > 0);
 }
@@ -203,7 +297,9 @@ export function getUnitEquipmentBonuses(unit, config) {
     let bonusHp = 0;
     let bonusMp = 0;
     let bonusAtk = 0;
+    let bonusSpi = 0;
     let bonusDef = 0;
+    let bonusMdef = 0;
     const grantedSkills = [];
     const passiveStatuses = [];
 
@@ -213,7 +309,9 @@ export function getUnitEquipmentBonuses(unit, config) {
         bonusHp += Number(eq.bonusHp || 0);
         bonusMp += Number(eq.bonusMp || 0);
         bonusAtk += Number(eq.bonusAtk || 0);
+        bonusSpi += Number(eq.bonusSpi || 0);
         bonusDef += Number(eq.bonusDef || 0);
+        bonusMdef += Number(eq.bonusMdef || 0);
         if (eq.grantSkillId) {
             grantedSkills.push({ skillId: eq.grantSkillId, equipName: eq.name });
         }
@@ -222,35 +320,37 @@ export function getUnitEquipmentBonuses(unit, config) {
         }
     }
 
-    return { bonusHp, bonusMp, bonusAtk, bonusDef, grantedSkills, passiveStatuses };
+    return { bonusHp, bonusMp, bonusAtk, bonusSpi, bonusDef, bonusMdef, grantedSkills, passiveStatuses };
 }
 
 /**
- * 同步单位因装备变化引起的上限变化与常驻 Buff 挂载/移除
- * @param {object} unit
- * @param {object} config
- * @param {boolean} [fillNewMax=false] 开战初始化时直接按新上限满血满蓝
+ * 同步单位因装备、自由加点与职业变化引起的上限变化与常驻 Buff 挂载/移除
  */
 export function syncUnitEquipmentEffects(unit, config, fillNewMax = false) {
     if (!unit) return;
-    // 兼容 v1 旧存档（没有 baseMaxHp / baseMaxMp 字段时自动补齐）
     if (!Number.isFinite(unit.baseMaxHp)) unit.baseMaxHp = unit.maxHp;
     if (!Number.isFinite(unit.baseMaxMp)) unit.baseMaxMp = unit.maxMp;
+    if (!Number.isFinite(unit.baseSpi)) unit.baseSpi = 15;
+    if (!Number.isFinite(unit.baseMdef)) unit.baseMdef = 5;
+    if (!Number.isFinite(unit.level)) unit.level = 1;
+    if (!unit.allocated || typeof unit.allocated !== 'object') {
+        unit.allocated = { vit: 0, str: 0, spi: 0, def: 0, mdef: 0 };
+    }
     if (!Array.isArray(unit.equipmentIds)) unit.equipmentIds = [];
     if (!Array.isArray(unit.statuses)) unit.statuses = [];
 
-    const bonus = getUnitEquipmentBonuses(unit, config);
+    const eqBonus = getUnitEquipmentBonuses(unit, config);
+    const progBonus = getUnitProgressionBonuses(unit, config);
     const prevMaxHp = unit.maxHp;
     const prevMaxMp = unit.maxMp;
 
-    unit.maxHp = Math.max(1, unit.baseMaxHp + bonus.bonusHp);
-    unit.maxMp = Math.max(0, unit.baseMaxMp + bonus.bonusMp);
+    unit.maxHp = Math.max(1, unit.baseMaxHp + eqBonus.bonusHp + progBonus.bonusHp);
+    unit.maxMp = Math.max(0, unit.baseMaxMp + eqBonus.bonusMp + progBonus.bonusMp);
 
     if (fillNewMax) {
         unit.hp = unit.maxHp;
         unit.mp = unit.maxMp;
     } else {
-        // 战斗中穿戴加血上限的装备时，若单位存活则按增量抬升当前血量；脱下时不超过新上限
         if (isAlive(unit) && unit.maxHp > prevMaxHp) {
             unit.hp = Math.min(unit.maxHp, unit.hp + (unit.maxHp - prevMaxHp));
         } else {
@@ -263,15 +363,12 @@ export function syncUnitEquipmentEffects(unit, config, fillNewMax = false) {
         }
     }
 
-    // 同步装备附带的常驻 Buff（标记 source: 'equipment'）
-    const desiredKeys = new Set(bonus.passiveStatuses.map(p => `${p.equipId}::${p.statusId}`));
-    // 移除已脱下装备的常驻 Buff
+    const desiredKeys = new Set(eqBonus.passiveStatuses.map(p => `${p.equipId}::${p.statusId}`));
     unit.statuses = unit.statuses.filter(st => {
         if (st.source !== 'equipment') return true;
         return desiredKeys.has(`${st.sourceEquipId}::${st.statusId}`);
     });
-    // 补充新穿上装备的常驻 Buff
-    for (const ps of bonus.passiveStatuses) {
+    for (const ps of eqBonus.passiveStatuses) {
         const def = findStatusDefById(config, ps.statusId);
         if (!def) continue;
         const exists = unit.statuses.some(
@@ -289,9 +386,6 @@ export function syncUnitEquipmentEffects(unit, config, fillNewMax = false) {
     }
 }
 
-/**
- * 同步战场上所有单位的装备效果（例如在设置中改完装备数值或 Buff 后即时生效）
- */
 export function syncAllUnitsEquipment(state, config) {
     if (!state || !state.active) return;
     for (const unit of getAllUnits(state)) {
@@ -300,36 +394,46 @@ export function syncAllUnitsEquipment(state, config) {
 }
 
 /**
- * 获取单位当前可用的完整技能列表（自身技能 + 穿戴装备附带技能）
- * @param {object} unit
- * @param {object} config
- * @returns {Array<{ skill: object, fromEquipmentName: string }>}
+ * 获取单位当前可用的完整技能列表（通用/自身技能 + 职业按等级解锁技能 + 装备附带技能）
  */
 export function getUnitAvailableSkills(unit, config) {
     if (!unit) return [];
     const result = [];
     const seen = new Set();
 
+    // 1. 职业树按等级解锁的技能（优先展示）
+    const progBonus = getUnitProgressionBonuses(unit, config);
+    for (const cs of progBonus.unlockedSkills) {
+        if (seen.has(cs.skillId)) continue;
+        const sk = findSkillById(config, cs.skillId);
+        if (sk) {
+            seen.add(cs.skillId);
+            result.push({ skill: sk, fromEquipmentName: '', fromClassName: cs.className });
+        }
+    }
+
+    // 2. 角色手动挂载的技能（通用技能池 / 剧情领悟技能）
     const baseSkillIds = (unit.skillIds && unit.skillIds.length > 0)
         ? unit.skillIds
-        : (unit.side === 'ally' ? (config.skills || []).map(s => s.id) : []);
+        : (result.length === 0 && unit.side === 'ally' ? (config.skills || []).filter(s => s.poolType === 'universal').map(s => s.id) : []);
 
     for (const id of baseSkillIds) {
         if (seen.has(id)) continue;
         const sk = findSkillById(config, id);
         if (sk) {
             seen.add(id);
-            result.push({ skill: sk, fromEquipmentName: '' });
+            result.push({ skill: sk, fromEquipmentName: '', fromClassName: '' });
         }
     }
 
-    const bonus = getUnitEquipmentBonuses(unit, config);
-    for (const gs of bonus.grantedSkills) {
+    // 3. 穿戴装备附带解锁的技能
+    const eqBonus = getUnitEquipmentBonuses(unit, config);
+    for (const gs of eqBonus.grantedSkills) {
         if (seen.has(gs.skillId)) continue;
         const sk = findSkillById(config, gs.skillId);
         if (sk) {
             seen.add(gs.skillId);
-            result.push({ skill: sk, fromEquipmentName: gs.equipName });
+            result.push({ skill: sk, fromEquipmentName: gs.equipName, fromClassName: '' });
         }
     }
 
@@ -337,12 +441,15 @@ export function getUnitAvailableSkills(unit, config) {
 }
 
 /**
- * 计算单位叠加装备加成与全部 Buff/Debuff 后的实时攻击力与防御力
+ * 计算单位叠加加点、职业、装备与全部 Buff/Debuff 后的实时物攻/精神法攻/物防/法抗
  */
 export function getEffectiveStats(unit, config) {
-    const bonus = getUnitEquipmentBonuses(unit, config);
+    const eqBonus = getUnitEquipmentBonuses(unit, config);
+    const progBonus = getUnitProgressionBonuses(unit, config);
     let atkMultiplier = 1;
+    let spiMultiplier = 1;
     let defMultiplier = 1;
+    let mdefMultiplier = 1;
     let isStunned = false;
 
     for (const activeSt of unit.statuses || []) {
@@ -351,22 +458,26 @@ export function getEffectiveStats(unit, config) {
         if (def.skipTurn || def.effectType === 'skip_turn') {
             isStunned = true;
         }
-        if (Number.isFinite(def.atkMultiplier) && def.atkMultiplier > 0 && def.atkMultiplier !== 1) {
-            atkMultiplier *= def.atkMultiplier;
-        }
-        if (Number.isFinite(def.defMultiplier) && def.defMultiplier > 0 && def.defMultiplier !== 1) {
-            defMultiplier *= def.defMultiplier;
-        }
+        if (Number.isFinite(def.atkMultiplier) && def.atkMultiplier > 0 && def.atkMultiplier !== 1) atkMultiplier *= def.atkMultiplier;
+        if (Number.isFinite(def.spiMultiplier) && def.spiMultiplier > 0 && def.spiMultiplier !== 1) spiMultiplier *= def.spiMultiplier;
+        if (Number.isFinite(def.defMultiplier) && def.defMultiplier > 0 && def.defMultiplier !== 1) defMultiplier *= def.defMultiplier;
+        if (Number.isFinite(def.mdefMultiplier) && def.mdefMultiplier > 0 && def.mdefMultiplier !== 1) mdefMultiplier *= def.mdefMultiplier;
     }
 
-    const totalBaseAtk = Math.max(0, (unit.baseAtk || 0) + bonus.bonusAtk);
-    const totalBaseDef = Math.max(0, (unit.baseDef || 0) + bonus.bonusDef);
+    const totalBaseAtk = Math.max(0, (unit.baseAtk || 0) + eqBonus.bonusAtk + progBonus.bonusAtk);
+    const totalBaseSpi = Math.max(0, (unit.baseSpi ?? unit.spi ?? 15) + eqBonus.bonusSpi + progBonus.bonusSpi);
+    const totalBaseDef = Math.max(0, (unit.baseDef || 0) + eqBonus.bonusDef + progBonus.bonusDef);
+    const totalBaseMdef = Math.max(0, (unit.baseMdef ?? unit.mdef ?? 5) + eqBonus.bonusMdef + progBonus.bonusMdef);
 
     return {
         atk: Math.max(0, Math.round(totalBaseAtk * atkMultiplier)),
+        spi: Math.max(0, Math.round(totalBaseSpi * spiMultiplier)),
         def: Math.max(0, Math.round(totalBaseDef * defMultiplier)),
+        mdef: Math.max(0, Math.round(totalBaseMdef * mdefMultiplier)),
         atkMultiplier: Number(atkMultiplier.toFixed(2)),
+        spiMultiplier: Number(spiMultiplier.toFixed(2)),
         defMultiplier: Number(defMultiplier.toFixed(2)),
+        mdefMultiplier: Number(mdefMultiplier.toFixed(2)),
         isStunned,
     };
 }
@@ -392,11 +503,22 @@ export function appendBattleLog(state, line) {
  */
 
 function instantiateUnit(tpl, side, config) {
+    const rawAlloc = tpl.allocated && typeof tpl.allocated === 'object' ? tpl.allocated : {};
     const unit = {
         id: tpl.id,
         side,
         name: tpl.name,
         description: String(tpl.description || ''),
+        level: Math.max(1, Math.round(Number(tpl.level ?? 1) || 1)),
+        classId: String(tpl.classId || ''),
+        freePoints: Math.max(0, Math.round(Number(tpl.freePoints ?? 0) || 0)),
+        allocated: {
+            vit: Math.max(0, Math.round(Number(rawAlloc.vit ?? 0) || 0)),
+            str: Math.max(0, Math.round(Number(rawAlloc.str ?? 0) || 0)),
+            spi: Math.max(0, Math.round(Number(rawAlloc.spi ?? 0) || 0)),
+            def: Math.max(0, Math.round(Number(rawAlloc.def ?? 0) || 0)),
+            mdef: Math.max(0, Math.round(Number(rawAlloc.mdef ?? 0) || 0)),
+        },
         baseMaxHp: tpl.maxHp,
         maxHp: tpl.maxHp,
         hp: tpl.maxHp,
@@ -404,7 +526,9 @@ function instantiateUnit(tpl, side, config) {
         maxMp: tpl.maxMp,
         mp: tpl.maxMp,
         baseAtk: tpl.atk,
+        baseSpi: Number.isFinite(Number(tpl.spi)) ? Number(tpl.spi) : 15,
         baseDef: tpl.def,
+        baseMdef: Number.isFinite(Number(tpl.mdef)) ? Number(tpl.mdef) : 5,
         gauges: {
             gauge_a: clamp(tpl.initialGaugeA ?? 0, 0, 100),
             gauge_b: clamp(tpl.initialGaugeB ?? 0, 0, 100),
@@ -418,6 +542,109 @@ function instantiateUnit(tpl, side, config) {
     };
     syncUnitEquipmentEffects(unit, config, true);
     return unit;
+}
+
+/**
+ * 修炼突破升级：提升角色等级并发放自由属性点（同时更新战斗实体与持久化模板）
+ */
+export function levelUpUnit(state, config, unitId, deltaLevels = 1) {
+    const delta = Math.max(1, Math.round(Number(deltaLevels) || 1));
+    const tpl = (config.allies || []).find(a => a.id === unitId);
+    if (!tpl) return { ok: false, message: '未找到我方角色。' };
+
+    const ptsPerLv = Math.max(0, Math.round(Number(config?.progression?.pointsPerLevel ?? 3) || 0));
+    const prevLevel = Math.max(1, Number(tpl.level) || 1);
+    const nextLevel = prevLevel + delta;
+    const gainedPts = delta * ptsPerLv;
+
+    tpl.level = nextLevel;
+    tpl.freePoints = (Number(tpl.freePoints) || 0) + gainedPts;
+
+    const live = state?.active ? (state.allies || []).find(u => u.id === tpl.id) : null;
+    if (live) {
+        live.level = tpl.level;
+        live.freePoints = tpl.freePoints;
+        syncUnitEquipmentEffects(live, config, false);
+        appendBattleLog(state, `⬆️ ${live.name} 修炼突破至 Lv.${nextLevel}，获得 ${gainedPts} 点自由属性点！`);
+    }
+    return { ok: true, level: nextLevel, gainedPts };
+}
+
+/**
+ * 分配 1 点自由属性点到 5 项基础属性之一 (vit / str / spi / def / mdef)
+ */
+export function allocateStatPoint(state, config, unitId, statKey) {
+    if (!['vit', 'str', 'spi', 'def', 'mdef'].includes(statKey)) {
+        return { ok: false, message: '未知属性项。' };
+    }
+    const tpl = (config.allies || []).find(a => a.id === unitId);
+    if (!tpl) return { ok: false, message: '未找到角色。' };
+    if ((Number(tpl.freePoints) || 0) <= 0) {
+        return { ok: false, message: '没有剩余的自由属性点。' };
+    }
+    if (!tpl.allocated) tpl.allocated = { vit: 0, str: 0, spi: 0, def: 0, mdef: 0 };
+
+    tpl.freePoints -= 1;
+    tpl.allocated[statKey] = (Number(tpl.allocated[statKey]) || 0) + 1;
+
+    const live = state?.active ? (state.allies || []).find(u => u.id === tpl.id) : null;
+    if (live) {
+        live.freePoints = tpl.freePoints;
+        live.allocated = { ...tpl.allocated };
+        syncUnitEquipmentEffects(live, config, false);
+    }
+    return { ok: true };
+}
+
+/**
+ * 一键洗点：将角色已分配的自由属性点全部返还
+ */
+export function resetUnitAllocatedPoints(state, config, unitId) {
+    const tpl = (config.allies || []).find(a => a.id === unitId);
+    if (!tpl) return { ok: false, message: '未找到角色。' };
+    const alloc = tpl.allocated || { vit: 0, str: 0, spi: 0, def: 0, mdef: 0 };
+    const totalSpent = (alloc.vit || 0) + (alloc.str || 0) + (alloc.spi || 0) + (alloc.def || 0) + (alloc.mdef || 0);
+    if (totalSpent === 0) return { ok: false, message: '当前尚未分配任何属性点。' };
+
+    tpl.freePoints = (Number(tpl.freePoints) || 0) + totalSpent;
+    tpl.allocated = { vit: 0, str: 0, spi: 0, def: 0, mdef: 0 };
+
+    const live = state?.active ? (state.allies || []).find(u => u.id === tpl.id) : null;
+    if (live) {
+        live.freePoints = tpl.freePoints;
+        live.allocated = { ...tpl.allocated };
+        syncUnitEquipmentEffects(live, config, false);
+    }
+    return { ok: true, refunded: totalSpent };
+}
+
+/**
+ * 切换/转职角色职业（校验等级要求，进阶职业自动继承父职业技能）
+ */
+export function changeUnitClass(state, config, unitId, nextClassId) {
+    const tpl = (config.allies || []).find(a => a.id === unitId);
+    if (!tpl) return { ok: false, message: '未找到角色。' };
+
+    if (!nextClassId) {
+        tpl.classId = '';
+    } else {
+        const cls = findClassById(config, nextClassId);
+        if (!cls) return { ok: false, message: '未找到目标职业。' };
+        const lv = Math.max(1, Number(tpl.level) || 1);
+        if (lv < (Number(cls.requiredLevel) || 1)) {
+            return { ok: false, message: `转职「${cls.name}」需要达到 Lv.${cls.requiredLevel}（当前 Lv.${lv}）。` };
+        }
+        tpl.classId = cls.id;
+    }
+
+    const live = state?.active ? (state.allies || []).find(u => u.id === tpl.id) : null;
+    if (live) {
+        live.classId = tpl.classId;
+        syncUnitEquipmentEffects(live, config, false);
+        const clsName = findClassById(config, tpl.classId)?.name || '无职业';
+        appendBattleLog(state, `🛡️ ${live.name} 职业变更为「${clsName}」！`);
+    }
+    return { ok: true };
 }
 
 /**
@@ -604,7 +831,10 @@ function buildFormulaVars(actor, target, config) {
     const targetEff = getEffectiveStats(target, config);
     return {
         atk: actorEff.atk,
+        spi: actorEff.spi,
         def: actorEff.def,
+        mdef: actorEff.mdef,
+        level: Math.max(1, Number(actor.level) || 1),
         hp: actor.hp,
         max_hp: actor.maxHp,
         mp: actor.mp,
@@ -612,7 +842,10 @@ function buildFormulaVars(actor, target, config) {
         gauge_a: actor.gauges.gauge_a,
         gauge_b: actor.gauges.gauge_b,
         target_atk: targetEff.atk,
+        target_spi: targetEff.spi,
         target_def: targetEff.def,
+        target_mdef: targetEff.mdef,
+        target_level: Math.max(1, Number(target.level) || 1),
         target_hp: target.hp,
         target_max_hp: target.maxHp,
         target_gauge_a: target.gauges.gauge_a,
