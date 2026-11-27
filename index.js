@@ -35,12 +35,17 @@ function syncAllRuntime() {
 }
 
 /**
- * 当用户在酒馆里切换聊天记录时，切换对应的战斗进度并重新计算提示词注入
+ * 当用户在酒馆里切换聊天记录或切换角色卡时，切换对应的战斗进度并重新计算提示词注入
  */
 function handleChatChanged() {
-    currentBattleState = loadBattleState();
-    activePrompts = syncThresholdPrompts(currentBattleState, currentConfig);
-    hudController?.render();
+    const applySwitch = () => {
+        currentBattleState = loadBattleState();
+        activePrompts = syncThresholdPrompts(currentBattleState, currentConfig);
+        hudController?.render();
+    };
+    applySwitch();
+    // 兼容部分环境下 chatMetadata 在事件触发后稍晚一拍才完成加载
+    setTimeout(applySwitch, 120);
 }
 
 /**

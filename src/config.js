@@ -311,46 +311,82 @@ export async function importConfigFromJsonText(jsonText) {
 }
 
 /**
- * 读取当前聊天对应的战斗进度（不同聊天窗口隔离）
+ * 获取当前聊天/角色卡的唯一隔离键，确保切换角色卡或切换对话时战斗状态严格隔离
+ * @param {object} ctx
+ * @returns {string}
+ */
+function getCurrentChatScopeKey(ctx) {
+    if (ctx.chatId) return `chat:${ctx.chatId}`;
+    if (ctx.groupId) return `group:${ctx.groupId}`;
+    if (ctx.characterId !== undefined && ctx.characterId !== null && ctx.characterId !== '') {
+        return `char:${ctx.characterId}`;
+    }
+    return '';
+}
+
+/**
+ * 读取当前聊天对应的战斗进度（不同角色卡/不同聊天窗口严格隔离）
  * @returns {object|null}
  */
 export function loadBattleState() {
     const ctx = getSTContext();
-    if (ctx.chatMetadata && ctx.chatMetadata[EXTENSION_KEY]?.battleState) {
-        return deepClone(ctx.chatMetadata[EXTENSION_KEY].battleState);
+    const scopeKey = getCurrentChatScopeKey(ctx);
+
+    // 优先读取当前聊天专属的 chatMetadata
+    if (ctx.chatMetadata && typeof ctx.chatMetadata === 'object') {
+        const metaEntry = ctx.chatMetadata[EXTENSION_KEY];
+        if (metaEntry && Object.prototype.hasOwnProperty.call(metaEntry, 'battleState')) {
+            return metaEntry.battleState ? deepClone(metaEntry.battleState) : null;
+        }
     }
-    if (ctx.extensionSettings?.[EXTENSION_KEY]?.fallbackBattleState) {
-        return deepClone(ctx.extensionSettings[EXTENSION_KEY].fallbackBattleState);
+
+    // 按 scopeKey 隔离的兜底存储（绝不跨角色卡/跨聊天串数据）
+    if (scopeKey && ctx.extensionSettings?.[EXTENSION_KEY]?.battleStatesByChat) {
+        const scoped = ctx.extensionSettings[EXTENSION_KEY].battleStatesByChat[scopeKey];
+        return scoped ? deepClone(scoped) : null;
     }
+
     return null;
 }
 
 /**
- * 保存当前聊天的战斗进度
+ * 保存当前聊天的战斗进度（严格按当前聊天/角色卡隔离）
  * @param {object|null} battleState
  */
 export function saveBattleState(battleState) {
     const ctx = getSTContext();
     const snapshot = battleState ? deepClone(battleState) : null;
+    const scopeKey = getCurrentChatScopeKey(ctx);
 
-    if (ctx.chatMetadata && typeof ctx.saveMetadata === 'function') {
+    if (ctx.chatMetadata && typeof ctx.chatMetadata === 'object') {
         if (!ctx.chatMetadata[EXTENSION_KEY]) {
             ctx.chatMetadata[EXTENSION_KEY] = {};
         }
         ctx.chatMetadata[EXTENSION_KEY].battleState = snapshot;
-        try {
-            ctx.saveMetadata();
-        } catch (err) {
-            console.warn('[CombatFramework] chatMetadata 保存失败，回退至 extensionSettings:', err);
+        if (typeof ctx.saveMetadata === 'function') {
+            try {
+                ctx.saveMetadata();
+            } catch (err) {
+                console.warn('[CombatFramework] chatMetadata 保存失败:', err);
+            }
         }
     }
 
-    // 同时在 extensionSettings 留一份兜底，防止无聊天上下文时丢失
-    if (ctx.extensionSettings) {
+    // 同步按 scopeKey 写入隔离映射，兼容部分前端壳不持久化 chatMetadata 的情况
+    if (scopeKey && ctx.extensionSettings) {
         if (!ctx.extensionSettings[EXTENSION_KEY]) {
             ctx.extensionSettings[EXTENSION_KEY] = {};
         }
-        ctx.extensionSettings[EXTENSION_KEY].fallbackBattleState = snapshot;
+        if (!ctx.extensionSettings[EXTENSION_KEY].battleStatesByChat) {
+            ctx.extensionSettings[EXTENSION_KEY].battleStatesByChat = {};
+        }
+        if (snapshot) {
+            ctx.extensionSettings[EXTENSION_KEY].battleStatesByChat[scopeKey] = snapshot;
+        } else {
+            delete ctx.extensionSettings[EXTENSION_KEY].battleStatesByChat[scopeKey];
+        }
+        // 清理旧版本的全局兜底字段，彻底杜绝串卡
+        delete ctx.extensionSettings[EXTENSION_KEY].fallbackBattleState;
         if (typeof ctx.saveSettingsDebounced === 'function') {
             ctx.saveSettingsDebounced();
         }
