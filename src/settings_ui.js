@@ -95,6 +95,9 @@ export async function initSettingsUI(deps) {
     const elEnabled = container.querySelector('#stcf-set-enabled');
     const elPerChar = container.querySelector('#stcf-set-per-char');
     const elListenAi = container.querySelector('#stcf-set-listen-ai');
+    const elSyncParty = container.querySelector('#stcf-set-sync-party');
+    const elSyncBattle = container.querySelector('#stcf-set-sync-battle');
+    const elSyncCatalog = container.querySelector('#stcf-set-sync-catalog');
     const elHudCollapsed = container.querySelector('#stcf-set-hud-collapsed');
     const elAutoEndTurn = container.querySelector('#stcf-set-auto-end-turn');
     const elOutputMode = container.querySelector('#stcf-set-output-mode');
@@ -121,6 +124,9 @@ export async function initSettingsUI(deps) {
         setIoStatus(elPerChar.checked ? '✅ 已开启按角色卡独立保存方案' : '✅ 已切换为全局共用方案');
     });
     elListenAi.addEventListener('change', () => { deps.getConfig().general.listenAiEvents = elListenAi.checked; commitChange(); });
+    elSyncParty.addEventListener('change', () => { deps.getConfig().general.syncPartyToAi = elSyncParty.checked; commitChange(); });
+    elSyncBattle.addEventListener('change', () => { deps.getConfig().general.syncBattleToAi = elSyncBattle.checked; commitChange(); });
+    elSyncCatalog.addEventListener('change', () => { deps.getConfig().general.syncCatalogToAi = elSyncCatalog.checked; commitChange(); });
     elHudCollapsed.addEventListener('change', () => { deps.getConfig().general.hudStartCollapsed = elHudCollapsed.checked; commitChange(); });
     elAutoEndTurn.addEventListener('change', () => { deps.getConfig().general.autoEndPlayerTurn = elAutoEndTurn.checked; commitChange(); });
     elOutputMode.addEventListener('change', () => { deps.getConfig().general.outputMode = elOutputMode.value; commitChange(); });
@@ -216,14 +222,15 @@ export async function initSettingsUI(deps) {
     function addUnit(side) {
         const cfg = deps.getConfig();
         const list = side === 'ally' ? cfg.allies : cfg.enemies;
-        if (list.length >= MAX_UNITS_PER_SIDE) {
-            window.alert(`每方最多支持 ${MAX_UNITS_PER_SIDE} 名参战角色（最多 4v4）。`);
+        if (side === 'ally' && list.length >= MAX_UNITS_PER_SIDE) {
+            window.alert(`我方最多支持 ${MAX_UNITS_PER_SIDE} 名参战角色（最多 4v4）。`);
             return;
         }
         list.push({
             id: makeUniqueId(side, list),
-            enabled: true,
+            enabled: side === 'ally' ? true : list.filter(x => x.enabled).length < MAX_UNITS_PER_SIDE,
             name: side === 'ally' ? `我方角色${list.length + 1}` : `敌方目标${list.length + 1}`,
+            description: side === 'ally' ? '我方参战成员简短定位说明' : '敌方单位外观特征与战斗风格简述',
             maxHp: 100,
             maxMp: 50,
             atk: 20,
@@ -270,6 +277,9 @@ export async function initSettingsUI(deps) {
                         <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(u.name)}" placeholder="角色名称">
                         <span class="stcf-id-tag">${escapeHtml(u.id)}</span>
                         ${list.length > 1 ? '<button type="button" class="stcf-del-btn" data-action="delete" title="删除角色">🗑️</button>' : ''}
+                    </div>
+                    <div class="stcf-field-row">
+                        <input type="text" class="text_pole" data-field="description" value="${escapeHtml(u.description || '')}" placeholder="一句话简约描述（如：重甲敌兵，擅长破防；会同步给剧情 AI 查阅）">
                     </div>
                     <div class="stcf-grid-4">
                         <label class="stcf-mini-field"><span>基础 HP</span><input type="number" min="1" class="text_pole" data-field="maxHp" value="${u.maxHp}"></label>
@@ -875,6 +885,9 @@ export async function initSettingsUI(deps) {
         elEnabled.checked = cfg.general.enabled !== false;
         elPerChar.checked = usePerChar;
         elListenAi.checked = cfg.general.listenAiEvents !== false;
+        elSyncParty.checked = cfg.general.syncPartyToAi !== false;
+        elSyncBattle.checked = cfg.general.syncBattleToAi !== false;
+        elSyncCatalog.checked = cfg.general.syncCatalogToAi !== false;
         elHudCollapsed.checked = cfg.general.hudStartCollapsed !== false;
         elAutoEndTurn.checked = cfg.general.autoEndPlayerTurn !== false;
         elOutputMode.value = cfg.general.outputMode || 'fill_input';

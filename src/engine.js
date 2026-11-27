@@ -396,6 +396,7 @@ function instantiateUnit(tpl, side, config) {
         id: tpl.id,
         side,
         name: tpl.name,
+        description: String(tpl.description || ''),
         baseMaxHp: tpl.maxHp,
         maxHp: tpl.maxHp,
         hp: tpl.maxHp,
@@ -415,6 +416,76 @@ function instantiateUnit(tpl, side, config) {
     };
     syncUnitEquipmentEffects(unit, config, true);
     return unit;
+}
+
+/**
+ * 战斗中动态塞入敌方增援单位（最多 4 名敌方；若已有同 ID 敌人则自动分配不冲突 ID）
+ * @param {object} state
+ * @param {object} config
+ * @param {object} enemyTpl
+ * @returns {{ ok: boolean, message?: string, unit?: object }}
+ */
+export function addEnemyToBattle(state, config, enemyTpl) {
+    if (!state || !state.active) {
+        return { ok: false, message: '当前未处于战斗中，请直接开启战斗。' };
+    }
+    if ((state.enemies || []).length >= MAX_UNITS_PER_SIDE) {
+        return { ok: false, message: `敌方场上人数已达上限（最多 ${MAX_UNITS_PER_SIDE} 人）。` };
+    }
+
+    const usedIds = new Set(getAllUnits(state).map(u => u.id));
+    let finalId = String(enemyTpl?.id || `enemy_reinf_${state.enemies.length + 1}`);
+    let suffix = 2;
+    while (usedIds.has(finalId)) {
+        finalId = `${enemyTpl?.id || 'enemy_reinf'}_${suffix++}`;
+    }
+
+    const sameNameCount = state.enemies.filter(e => e.name === enemyTpl.name || e.name.startsWith(`${enemyTpl.name}#`)).length;
+    const finalName = sameNameCount > 0 ? `${enemyTpl.name}#${sameNameCount + 1}` : enemyTpl.name;
+
+    const newUnit = instantiateUnit({ ...enemyTpl, id: finalId, name: finalName }, 'enemy', config);
+    state.enemies.push(newUnit);
+
+    // 若原本已胜利，增援加入后恢复我方行动
+    if (state.phase === 'victory' && state.allies.some(isAlive)) {
+        state.phase = 'player_turn';
+    }
+    appendBattleLog(state, `⚠️ 敌方增援：${newUnit.name}（HP ${newUnit.maxHp}）加入了战斗！`);
+    syncDefaultSelections(state);
+    return { ok: true, unit: newUnit };
+}
+
+/**
+ * 给角色学习/赋予一个技能（同时更新当前战斗中的单位与持久化配置模板）
+ * @param {object|null} state
+ * @param {object} config
+ * @param {string} unitId
+ * @param {string} skillId
+ * @returns {{ ok: boolean, message?: string }}
+ */
+export function grantSkillToUnit(state, config, unitId, skillId) {
+    const skill = findSkillById(config, skillId);
+    if (!skill) return { ok: false, message: '未在技能库中找到该技能。' };
+
+    const tpl = (config.allies || []).find(a => a.id === unitId) || config.allies?.[0];
+    if (!tpl) return { ok: false, message: '未找到我方角色。' };
+
+    if (!Array.isArray(tpl.skillIds)) tpl.skillIds = [];
+    if (!tpl.skillIds.includes(skill.id)) {
+        tpl.skillIds.push(skill.id);
+    }
+
+    if (state && state.active) {
+        const liveUnit = (state.allies || []).find(u => u.id === tpl.id);
+        if (liveUnit) {
+            if (!Array.isArray(liveUnit.skillIds)) liveUnit.skillIds = [];
+            if (!liveUnit.skillIds.includes(skill.id)) {
+                liveUnit.skillIds.push(skill.id);
+            }
+            appendBattleLog(state, `✨ ${liveUnit.name} 领悟/习得了技能「${skill.name}」！`);
+        }
+    }
+    return { ok: true };
 }
 
 /**

@@ -10,6 +10,7 @@
 
 import { saveConfig } from './config.js';
 import {
+    addEnemyToBattle,
     adjustUnitStatManual,
     checkSkillPrerequisite,
     createBattleState,
@@ -18,11 +19,14 @@ import {
     executeAllyAction,
     executeUseItem,
     findEquipmentById,
+    findItemById,
+    findSkillById,
     findStatusDefById,
     findUnitById,
     formatCombatLogOutput,
     getEffectiveStats,
     getUnitAvailableSkills,
+    grantSkillToUnit,
     isAlive,
     unequipItemFromUnit,
 } from './engine.js';
@@ -145,6 +149,10 @@ export async function initHudUI(deps) {
     const elHeader = root.querySelector('#stcf-hud-header');
     const elPhaseBadge = root.querySelector('#stcf-phase-badge');
     const elTurnBadge = root.querySelector('#stcf-turn-badge');
+    const elBtnAiContext = root.querySelector('#stcf-btn-ai-context');
+    const elContextBox = root.querySelector('#stcf-context-box');
+    const elContextChars = root.querySelector('#stcf-context-chars');
+    const elContextText = root.querySelector('#stcf-context-text');
     const elBtnScanAi = root.querySelector('#stcf-btn-scan-ai');
     const elBtnGm = root.querySelector('#stcf-btn-gm-mode');
     const elBtnStartReset = root.querySelector('#stcf-btn-start-reset');
@@ -272,6 +280,12 @@ export async function initHudUI(deps) {
         render();
     });
 
+    elBtnAiContext.addEventListener('click', () => {
+        const isHidden = elContextBox.classList.toggle('stcf-hidden');
+        elBtnAiContext.classList.toggle('active', !isHidden);
+        render();
+    });
+
     elBtnScanAi.addEventListener('click', () => {
         const found = deps.onRequestScanAi?.() || [];
         if (found.length === 0) {
@@ -346,7 +360,20 @@ export async function initHudUI(deps) {
         showToast('已清空本轮战报缓存');
     });
 
-    /** 渲染 AI 剧情事件一键确认条 */
+    /** 解析事件中的敌人列表（优先按 ID 查敌人图鉴，兼容临时自创敌人） */
+    function resolveEventEnemies(ev, config) {
+        const list = [];
+        for (const eid of ev.enemyIds || []) {
+            const tpl = (config.enemies || []).find(e => e.id === eid);
+            if (tpl) list.push({ ...tpl, enabled: true });
+        }
+        for (const custom of ev.enemies || []) {
+            list.push(custom);
+        }
+        return list.slice(0, 4);
+    }
+
+    /** 渲染 AI 剧情事件一键确认条（支持装备、道具、技能、开战、战斗中增援 5 类事件） */
     function renderPendingEvents() {
         const config = deps.getConfig();
         if (!pendingEvents.length) {
@@ -357,7 +384,8 @@ export async function initHudUI(deps) {
         elEventBar.classList.remove('stcf-hidden');
         elEventBar.innerHTML = pendingEvents.map(ev => {
             if (ev.type === 'loot_equipment') {
-                const eq = ev.equipment;
+                const eq = (ev.equipId && findEquipmentById(config, ev.equipId)) || ev.equipment;
+                if (!eq) return '';
                 const slotName = SLOT_LABELS[eq.slot] || eq.slot;
                 const summary = formatEquipBonusSummary(eq, config);
                 return `
@@ -372,10 +400,12 @@ export async function initHudUI(deps) {
                 `;
             }
             if (ev.type === 'loot_item') {
-                const it = ev.item;
+                const libItem = ev.itemId ? findItemById(config, ev.itemId) : null;
+                const it = libItem ? { ...libItem, quantity: ev.quantity || 1 } : ev.item;
+                if (!it) return '';
                 return `
                     <div class="stcf-event-item" data-ev-uid="${escapeHtml(ev.uid)}">
-                        <div class="stcf-event-desc">${escapeHtml(it.icon)} 剧情获得道具 <strong>【${escapeHtml(it.name)} ×${it.quantity}】</strong></div>
+                        <div class="stcf-event-desc">${escapeHtml(it.icon || '🎒')} 剧情获得道具 <strong>【${escapeHtml(it.name)} ×${it.quantity}】</strong></div>
                         <div class="stcf-event-actions">
                             <button type="button" class="stcf-btn stcf-btn-primary stcf-btn-sm" data-ev-act="accept_item">收入背包</button>
                             <button type="button" class="stcf-btn stcf-btn-sm" data-ev-act="dismiss">忽略</button>
@@ -383,13 +413,41 @@ export async function initHudUI(deps) {
                     </div>
                 `;
             }
+            if (ev.type === 'grant_skill') {
+                const sk = (ev.skillId && findSkillById(config, ev.skillId)) || ev.skill;
+                if (!sk) return '';
+                return `
+                    <div class="stcf-event-item" data-ev-uid="${escapeHtml(ev.uid)}">
+                        <div class="stcf-event-desc">✨ 剧情领悟技能 <strong>【${escapeHtml(sk.name)}】</strong>${sk.description ? `（${escapeHtml(sk.description)}）` : ''}</div>
+                        <div class="stcf-event-actions">
+                            <button type="button" class="stcf-btn stcf-btn-primary stcf-btn-sm" data-ev-act="accept_skill">学会该技能</button>
+                            <button type="button" class="stcf-btn stcf-btn-sm" data-ev-act="dismiss">忽略</button>
+                        </div>
+                    </div>
+                `;
+            }
             if (ev.type === 'start_combat') {
-                const names = ev.enemies.map(e => `${e.name}(HP:${e.maxHp})`).join('、') || '默认敌方';
+                const resolved = resolveEventEnemies(ev, config);
+                const names = resolved.map(e => `${e.name}(HP:${e.maxHp})`).join('、') || '默认敌方';
                 return `
                     <div class="stcf-event-item" data-ev-uid="${escapeHtml(ev.uid)}">
                         <div class="stcf-event-desc">⚔️ 剧情遭遇敌人：<strong>${escapeHtml(names)}</strong></div>
                         <div class="stcf-event-actions">
                             <button type="button" class="stcf-btn stcf-btn-warn stcf-btn-sm" data-ev-act="accept_combat">一键开战</button>
+                            <button type="button" class="stcf-btn stcf-btn-sm" data-ev-act="dismiss">忽略</button>
+                        </div>
+                    </div>
+                `;
+            }
+            if (ev.type === 'add_enemy') {
+                const resolved = resolveEventEnemies(ev, config);
+                const names = resolved.map(e => `${e.name}(HP:${e.maxHp})`).join('、');
+                if (!names) return '';
+                return `
+                    <div class="stcf-event-item" data-ev-uid="${escapeHtml(ev.uid)}">
+                        <div class="stcf-event-desc">🚨 战斗中敌方增援：<strong>${escapeHtml(names)}</strong></div>
+                        <div class="stcf-event-actions">
+                            <button type="button" class="stcf-btn stcf-btn-warn stcf-btn-sm" data-ev-act="accept_add_enemy">塞入当前战场</button>
                             <button type="button" class="stcf-btn stcf-btn-sm" data-ev-act="dismiss">忽略</button>
                         </div>
                     </div>
@@ -419,14 +477,19 @@ export async function initHudUI(deps) {
         }
 
         if (ev.type === 'loot_equipment') {
-            const eq = ev.equipment;
-            const existIdx = (config.equipments || []).findIndex(x => x.id === eq.id || x.name === eq.name);
+            const libEq = ev.equipId ? findEquipmentById(config, ev.equipId) : null;
+            const eq = libEq || ev.equipment;
+            if (!eq) { pendingEvents.splice(evIdx, 1); render(); return; }
+
             let finalId = eq.id;
-            if (existIdx >= 0) {
-                config.equipments[existIdx] = { ...config.equipments[existIdx], ...eq, id: config.equipments[existIdx].id };
-                finalId = config.equipments[existIdx].id;
-            } else {
-                config.equipments.push(eq);
+            if (!libEq) {
+                const existIdx = (config.equipments || []).findIndex(x => x.id === eq.id || x.name === eq.name);
+                if (existIdx >= 0) {
+                    config.equipments[existIdx] = { ...config.equipments[existIdx], ...eq, id: config.equipments[existIdx].id };
+                    finalId = config.equipments[existIdx].id;
+                } else {
+                    config.equipments.push(eq);
+                }
             }
 
             if (act === 'equip_now') {
@@ -452,27 +515,75 @@ export async function initHudUI(deps) {
         }
 
         if (ev.type === 'loot_item') {
-            const it = ev.item;
-            const exist = (config.items || []).find(x => x.id === it.id || x.name === it.name);
-            if (exist) {
-                exist.quantity = (exist.quantity || 0) + it.quantity;
-            } else {
-                config.items.push(it);
+            const libItem = ev.itemId ? findItemById(config, ev.itemId) : null;
+            if (libItem) {
+                libItem.quantity = (libItem.quantity || 0) + (ev.quantity || 1);
+                showToast(`🎒 「${libItem.name}」库存 +${ev.quantity || 1}`);
+            } else if (ev.item) {
+                const exist = (config.items || []).find(x => x.id === ev.item.id || x.name === ev.item.name);
+                if (exist) exist.quantity = (exist.quantity || 0) + ev.item.quantity;
+                else config.items.push(ev.item);
+                showToast(`🎒 已将「${ev.item.name} ×${ev.item.quantity}」收入背包`);
             }
             saveConfig(config);
             pendingEvents.splice(evIdx, 1);
             deps.onConfigMutated?.();
-            showToast(`🎒 已将「${it.name} ×${it.quantity}」收入道具背包`);
-            render();
+            deps.onStateMutated();
+            return;
+        }
+
+        if (ev.type === 'grant_skill') {
+            const libSkill = ev.skillId ? findSkillById(config, ev.skillId) : null;
+            const sk = libSkill || ev.skill;
+            if (!sk) { pendingEvents.splice(evIdx, 1); render(); return; }
+
+            let finalSkillId = sk.id;
+            if (!libSkill) {
+                const existIdx = (config.skills || []).findIndex(x => x.id === sk.id || x.name === sk.name);
+                if (existIdx >= 0) {
+                    config.skills[existIdx] = { ...config.skills[existIdx], ...sk, id: config.skills[existIdx].id };
+                    finalSkillId = config.skills[existIdx].id;
+                } else {
+                    config.skills.push(sk);
+                }
+            }
+            const targetUnitId = ev.unitId || state?.selectedActorId || config.allies?.[0]?.id;
+            grantSkillToUnit(state, config, targetUnitId, finalSkillId);
+            saveConfig(config);
+            pendingEvents.splice(evIdx, 1);
+            deps.onConfigMutated?.();
+            deps.onStateMutated();
+            showToast(`✨ 已学会技能「${sk.name}」`);
             return;
         }
 
         if (ev.type === 'start_combat') {
-            const nextState = createBattleState(config, ev.enemies.length ? ev.enemies : null);
+            const resolved = resolveEventEnemies(ev, config);
+            const nextState = createBattleState(config, resolved.length ? resolved : null);
             deps.setBattleState(nextState);
             pendingEvents.splice(evIdx, 1);
             deps.onStateMutated();
             showToast('⚔️ 已按剧情敌人开启战斗！');
+            return;
+        }
+
+        if (ev.type === 'add_enemy') {
+            const resolved = resolveEventEnemies(ev, config);
+            if (!state || !state.active) {
+                const nextState = createBattleState(config, resolved.length ? resolved : null);
+                deps.setBattleState(nextState);
+                showToast('⚔️ 已开启战斗并加入该敌人！');
+            } else {
+                let addedCount = 0;
+                for (const enemyTpl of resolved) {
+                    const r = addEnemyToBattle(state, config, enemyTpl);
+                    if (r.ok) addedCount++;
+                    else showToast(`⚠️ ${r.message}`);
+                }
+                if (addedCount > 0) showToast(`🚨 已向当前战场塞入 ${addedCount} 名敌方增援！`);
+            }
+            pendingEvents.splice(evIdx, 1);
+            deps.onStateMutated();
         }
     });
 
@@ -595,6 +706,9 @@ export async function initHudUI(deps) {
 
         const state = deps.getBattleState();
         const activePrompts = deps.getActivePrompts() || [];
+        const contextText = deps.getAiContextText?.() || '';
+        elContextChars.textContent = String(contextText.length);
+        elContextText.textContent = contextText || '（当前未开启 AI 上下文同步开关，可在扩展设置中开启）';
         renderPendingEvents();
 
         const evBadge = pendingEvents.length ? ` · 🎁${pendingEvents.length}` : '';

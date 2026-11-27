@@ -24,13 +24,16 @@ import { initSettingsUI } from './src/settings_ui.js';
 let currentConfig = null;
 let currentBattleState = null;
 let activePrompts = [];
+let aiContextText = '';
 let hudController = null;
 let settingsController = null;
 
-/** 统一同步：装备被动 -> 阈值 Buff & Prompt 注入 -> 保存战斗进度 -> 重绘 HUD */
+/** 统一同步：装备被动 -> 阈值 Buff & Prompt 注入 & AI 战况图鉴同步 -> 保存战斗进度 -> 重绘 HUD */
 function syncAllRuntime() {
     syncAllUnitsEquipment(currentBattleState, currentConfig);
-    activePrompts = syncThresholdPrompts(currentBattleState, currentConfig);
+    const res = syncThresholdPrompts(currentBattleState, currentConfig);
+    activePrompts = res.activeRules;
+    aiContextText = res.contextText;
     saveBattleState(currentBattleState);
     hudController?.render();
 }
@@ -41,7 +44,9 @@ function handleChatChanged() {
         currentConfig = await loadConfig();
         currentBattleState = loadBattleState();
         syncAllUnitsEquipment(currentBattleState, currentConfig);
-        activePrompts = syncThresholdPrompts(currentBattleState, currentConfig);
+        const res = syncThresholdPrompts(currentBattleState, currentConfig);
+        activePrompts = res.activeRules;
+        aiContextText = res.contextText;
         hudController?.clearPendingEvents();
         settingsController?.renderAll();
         hudController?.render();
@@ -65,7 +70,9 @@ async function bootstrap() {
         currentBattleState = loadBattleState();
 
         syncAllUnitsEquipment(currentBattleState, currentConfig);
-        activePrompts = syncThresholdPrompts(currentBattleState, currentConfig);
+        const initRes = syncThresholdPrompts(currentBattleState, currentConfig);
+        activePrompts = initRes.activeRules;
+        aiContextText = initRes.contextText;
 
         settingsController = await initSettingsUI({
             getConfig: () => currentConfig,
@@ -76,9 +83,12 @@ async function bootstrap() {
                 if (!currentConfig?.general?.enabled) {
                     clearAllInjectedPrompts();
                     activePrompts = [];
+                    aiContextText = '';
                 } else {
                     syncAllUnitsEquipment(currentBattleState, currentConfig);
-                    activePrompts = syncThresholdPrompts(currentBattleState, currentConfig);
+                    const res = syncThresholdPrompts(currentBattleState, currentConfig);
+                    activePrompts = res.activeRules;
+                    aiContextText = res.contextText;
                 }
                 hudController?.render();
             },
@@ -91,6 +101,7 @@ async function bootstrap() {
                 currentBattleState = nextState;
             },
             getActivePrompts: () => activePrompts,
+            getAiContextText: () => aiContextText,
             onStateMutated: syncAllRuntime,
             onConfigMutated: () => {
                 settingsController?.renderAll();

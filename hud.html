@@ -17,11 +17,18 @@
                 <span id="stcf-turn-badge" class="stcf-turn-badge">T0</span>
             </div>
             <div class="stcf-header-actions">
-                <button type="button" id="stcf-btn-scan-ai" class="stcf-icon-btn" title="扫描最新一条 AI 回复中的装备/道具/开战标签">🔍</button>
+                <button type="button" id="stcf-btn-ai-context" class="stcf-icon-btn" title="查看当前同步给剧情 AI 的角色/战况/图鉴摘要">🧠</button>
+                <button type="button" id="stcf-btn-scan-ai" class="stcf-icon-btn" title="扫描最新一条 AI 回复中的装备/道具/技能/开战/增援标签">🔍</button>
                 <button type="button" id="stcf-btn-gm-mode" class="stcf-icon-btn" title="开关手动数值微调模式">🛠️</button>
                 <button type="button" id="stcf-btn-start-reset" class="stcf-btn stcf-btn-primary stcf-btn-sm">开始战斗</button>
                 <button type="button" id="stcf-btn-collapse" class="stcf-icon-btn" title="折叠回迷你浮标">➖</button>
             </div>
+        </div>
+
+        <!-- 预览当前实时同步给剧情 AI 的文本摘要（点击 🧠 开关） -->
+        <div id="stcf-context-box" class="stcf-prompt-bar stcf-hidden" style="background:rgba(52,152,219,0.18);border-color:rgba(52,152,219,0.4);">
+            <div class="stcf-prompt-item-title">🧠 当前实时同步给剧情 AI 的上下文（约 <span id="stcf-context-chars">0</span> 字）：</div>
+            <div id="stcf-context-text" class="stcf-prompt-preview stcf-prompt-item-text"></div>
         </div>
 
         <!-- AI 剧情事件待确认条（检测到 <combat_event> 获得装备/道具/开战请求时弹出） -->

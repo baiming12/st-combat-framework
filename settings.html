@@ -37,7 +37,22 @@
 
                     <label class="stcf-checkbox-row">
                         <input type="checkbox" id="stcf-set-listen-ai">
-                        <span>监听 AI 回复中的 <code>&lt;combat_event&gt;</code> 剧情掉落/开战标签（需用户确认）</span>
+                        <span>监听 AI 回复中的 <code>&lt;combat_event&gt;</code> 剧情掉落/发技能/刷怪/增援标签（需用户确认）</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-sync-party">
+                        <span>🧠 让剧情 AI 实时看见：我方当前穿戴装备、已学技能与背包道具</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-sync-battle">
+                        <span>🧠 战斗中自动同步：敌我实时血量、状态槽、Buff 与敌方简介（非战斗自动撤回）</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-sync-catalog">
+                        <span>🧠 向剧情 AI 注入极简图鉴目录（列出敌人/技能/装备/道具 ID+名称+简述，方便 AI 精准刷怪与发放）</span>
                     </label>
 
                     <label class="stcf-checkbox-row">
@@ -157,8 +172,8 @@
 
                 <div class="stcf-section-card">
                     <div class="stcf-section-header">
-                        <span class="stcf-section-title">敌方单位（最多 4 人，勾选“出战”即参与战斗）</span>
-                        <button type="button" id="stcf-btn-add-enemy" class="menu_button stcf-sm-btn">➕ 添加敌方单位</button>
+                        <span class="stcf-section-title">敌方图鉴与默认出战（图鉴不限数量，单场最多 4 名同时上场）</span>
+                        <button type="button" id="stcf-btn-add-enemy" class="menu_button stcf-sm-btn">➕ 添加敌方模板</button>
                     </div>
                     <div id="stcf-enemies-editor" class="stcf-editor-list"></div>
                 </div>

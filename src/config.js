@@ -108,6 +108,7 @@ function normalizeUnitTemplate(rawUnit, side, index) {
         id: String(rawUnit?.id || defaultId).trim() || defaultId,
         enabled: rawUnit?.enabled !== false,
         name: String(rawUnit?.name ?? defaultId).trim() || defaultId,
+        description: String(rawUnit?.description || '').trim(),
         maxHp,
         maxMp,
         atk: Math.max(0, Number(rawUnit?.atk ?? 15) || 0),
@@ -116,6 +117,36 @@ function normalizeUnitTemplate(rawUnit, side, index) {
         initialGaugeB: clamp(rawUnit?.initialGaugeB ?? 0, 0, 100),
         skillIds: Array.isArray(rawUnit?.skillIds) ? rawUnit.skillIds.map(String) : [],
         equipmentIds: Array.isArray(rawUnit?.equipmentIds) ? rawUnit.equipmentIds.map(String) : [],
+    };
+}
+
+/**
+ * 规范化单个技能（同时供 AI 剧情 grant_skill 事件复用）
+ */
+export function normalizeSkill(sk, idx = 0) {
+    const defaultId = `skill_${String(idx + 1).padStart(2, '0')}`;
+    return {
+        id: String(sk?.id || defaultId).trim() || defaultId,
+        name: String(sk?.name ?? defaultId).trim() || defaultId,
+        description: String(sk?.description || ''),
+        mpCost: Math.max(0, Math.round(Number(sk?.mpCost ?? 0) || 0)),
+        targetType: ['single_enemy', 'all_enemies', 'self', 'single_ally', 'all_allies'].includes(sk?.targetType)
+            ? sk.targetType
+            : 'single_enemy',
+        effectType: ['damage', 'heal', 'mp_restore', 'utility'].includes(sk?.effectType)
+            ? sk.effectType
+            : 'damage',
+        formula: String(sk?.formula ?? '10'),
+        selfGaugeAChange: Number.isFinite(Number(sk?.selfGaugeAChange)) ? Number(sk.selfGaugeAChange) : 0,
+        selfGaugeBChange: Number.isFinite(Number(sk?.selfGaugeBChange)) ? Number(sk.selfGaugeBChange) : 0,
+        targetGaugeAChange: Number.isFinite(Number(sk?.targetGaugeAChange)) ? Number(sk.targetGaugeAChange) : 0,
+        targetGaugeBChange: Number.isFinite(Number(sk?.targetGaugeBChange)) ? Number(sk.targetGaugeBChange) : 0,
+        applyStatusId: String(sk?.applyStatusId || ''),
+        applyStatusChance: clamp(sk?.applyStatusChance ?? 100, 0, 100),
+        applyStatusTarget: sk?.applyStatusTarget === 'self' ? 'self' : 'target',
+        requiredTargetStatusIds: Array.isArray(sk?.requiredTargetStatusIds)
+            ? sk.requiredTargetStatusIds.map(String).filter(Boolean)
+            : [],
     };
 }
 
@@ -189,6 +220,9 @@ export function normalizeConfig(rawConfig, defaults) {
     general.enabled = general.enabled !== false;
     general.usePerCharacterConfig = general.usePerCharacterConfig !== false;
     general.listenAiEvents = general.listenAiEvents !== false;
+    general.syncPartyToAi = general.syncPartyToAi !== false;
+    general.syncBattleToAi = general.syncBattleToAi !== false;
+    general.syncCatalogToAi = general.syncCatalogToAi !== false;
     general.autoEndPlayerTurn = general.autoEndPlayerTurn !== false;
     general.hudStartCollapsed = general.hudStartCollapsed !== false;
 
@@ -251,29 +285,7 @@ export function normalizeConfig(rawConfig, defaults) {
 
     // 4. 技能库
     const rawSkills = Array.isArray(src.skills) ? src.skills : base.skills;
-    const skills = rawSkills.map((sk, idx) => ({
-        id: String(sk?.id || `skill_${idx + 1}`).trim() || `skill_${idx + 1}`,
-        name: String(sk?.name ?? `skill_${idx + 1}`).trim() || `skill_${idx + 1}`,
-        description: String(sk?.description || ''),
-        mpCost: Math.max(0, Math.round(Number(sk?.mpCost ?? 0) || 0)),
-        targetType: ['single_enemy', 'all_enemies', 'self', 'single_ally', 'all_allies'].includes(sk?.targetType)
-            ? sk.targetType
-            : 'single_enemy',
-        effectType: ['damage', 'heal', 'mp_restore', 'utility'].includes(sk?.effectType)
-            ? sk.effectType
-            : 'damage',
-        formula: String(sk?.formula ?? '10'),
-        selfGaugeAChange: Number.isFinite(Number(sk?.selfGaugeAChange)) ? Number(sk.selfGaugeAChange) : 0,
-        selfGaugeBChange: Number.isFinite(Number(sk?.selfGaugeBChange)) ? Number(sk.selfGaugeBChange) : 0,
-        targetGaugeAChange: Number.isFinite(Number(sk?.targetGaugeAChange)) ? Number(sk.targetGaugeAChange) : 0,
-        targetGaugeBChange: Number.isFinite(Number(sk?.targetGaugeBChange)) ? Number(sk.targetGaugeBChange) : 0,
-        applyStatusId: String(sk?.applyStatusId || ''),
-        applyStatusChance: clamp(sk?.applyStatusChance ?? 100, 0, 100),
-        applyStatusTarget: sk?.applyStatusTarget === 'self' ? 'self' : 'target',
-        requiredTargetStatusIds: Array.isArray(sk?.requiredTargetStatusIds)
-            ? sk.requiredTargetStatusIds.map(String).filter(Boolean)
-            : [],
-    }));
+    const skills = rawSkills.map((sk, idx) => normalizeSkill(sk, idx));
 
     // 5. 装备库 & 道具库（v1.1 新增）
     const rawEquips = Array.isArray(src.equipments) ? src.equipments : (base.equipments || []);
@@ -282,11 +294,11 @@ export function normalizeConfig(rawConfig, defaults) {
     const rawItems = Array.isArray(src.items) ? src.items : (base.items || []);
     const items = rawItems.map((it, idx) => normalizeItem(it, idx));
 
-    // 6. 我方与敌方单位（每方最多 4 人）
+    // 6. 我方与敌方模板库（我方最多 4 人；敌方作为敌人图鉴可存任意多种，开战/增援时场上最多同时 4v4）
     const rawAllies = Array.isArray(src.allies) && src.allies.length > 0 ? src.allies : base.allies;
     const rawEnemies = Array.isArray(src.enemies) && src.enemies.length > 0 ? src.enemies : base.enemies;
     const allies = rawAllies.slice(0, MAX_UNITS_PER_SIDE).map((u, idx) => normalizeUnitTemplate(u, 'ally', idx));
-    const enemies = rawEnemies.slice(0, MAX_UNITS_PER_SIDE).map((u, idx) => normalizeUnitTemplate(u, 'enemy', idx));
+    const enemies = rawEnemies.map((u, idx) => normalizeUnitTemplate(u, 'enemy', idx));
 
     // 7. 阈值触发规则（支持 Prompt 注入 + 状态满/空自动挂载 Buff）
     const rawRules = Array.isArray(src.triggerRules) ? src.triggerRules : base.triggerRules;
@@ -533,7 +545,7 @@ export async function importConfigFromJsonText(jsonText, mode = 'replace', curre
             ['equipments', '装备', Infinity],
             ['items', '道具', Infinity],
             ['allies', '我方角色', MAX_UNITS_PER_SIDE],
-            ['enemies', '敌方单位', MAX_UNITS_PER_SIDE],
+            ['enemies', '敌方图鉴', Infinity],
             ['triggerRules', '触发规则', Infinity],
         ];
 
