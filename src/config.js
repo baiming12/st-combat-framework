@@ -136,11 +136,56 @@ function normalizeUnitTemplate(rawUnit, side, index) {
 }
 
 /**
- * 规范化单个技能（v1.5 新增：大组世界观 worldview + 小组池 poolType: class/universal/monster）
+ * 规范化技能/道具的“多附加状态列表”（100% 向下兼容旧版单字段 applyStatusId）
+ */
+function normalizeApplyStatuses(rawList, legacyId, legacyChance = 100, legacyTarget = 'target') {
+    if (Array.isArray(rawList)) {
+        return rawList
+            .filter(x => x && (typeof x === 'string' || x.statusId))
+            .map(x => {
+                if (typeof x === 'string') {
+                    return { statusId: x.trim(), chance: 100, target: 'target' };
+                }
+                return {
+                    statusId: String(x.statusId || '').trim(),
+                    chance: clamp(x.chance ?? 100, 0, 100),
+                    target: x.target === 'self' ? 'self' : 'target',
+                };
+            })
+            .filter(x => x.statusId);
+    }
+    const singleId = String(legacyId || '').trim();
+    if (!singleId) return [];
+    return [{
+        statusId: singleId,
+        chance: clamp(legacyChance ?? 100, 0, 100),
+        target: legacyTarget === 'self' ? 'self' : 'target',
+    }];
+}
+
+/**
+ * 规范化字符串 ID 列表（向下兼容旧版单字符串字段）
+ */
+function normalizeIdList(rawArr, legacySingle = '') {
+    if (Array.isArray(rawArr)) {
+        return [...new Set(rawArr.map(x => String(x || '').trim()).filter(Boolean))];
+    }
+    const single = String(legacySingle || '').trim();
+    return single ? [single] : [];
+}
+
+/**
+ * 规范化单个技能（v1.6：多附加状态、冷却 CD、自身 HP 卖血/吸血公式、自身前置状态）
  */
 export function normalizeSkill(sk, idx = 0) {
     const defaultId = `skill_${String(idx + 1).padStart(2, '0')}`;
     const validPools = ['class', 'universal', 'monster'];
+    const applyStatuses = normalizeApplyStatuses(
+        sk?.applyStatuses,
+        sk?.applyStatusId,
+        sk?.applyStatusChance,
+        sk?.applyStatusTarget
+    );
     return {
         id: String(sk?.id || defaultId).trim() || defaultId,
         worldview: String(sk?.worldview || '通用').trim() || '通用',
@@ -148,6 +193,7 @@ export function normalizeSkill(sk, idx = 0) {
         name: String(sk?.name ?? defaultId).trim() || defaultId,
         description: String(sk?.description || ''),
         mpCost: Math.max(0, Math.round(Number(sk?.mpCost ?? 0) || 0)),
+        cooldown: Math.max(0, Math.round(Number(sk?.cooldown ?? 0) || 0)),
         targetType: ['single_enemy', 'all_enemies', 'self', 'single_ally', 'all_allies'].includes(sk?.targetType)
             ? sk.targetType
             : 'single_enemy',
@@ -155,16 +201,14 @@ export function normalizeSkill(sk, idx = 0) {
             ? sk.effectType
             : 'damage',
         formula: String(sk?.formula ?? '10'),
+        selfHpFormula: String(sk?.selfHpFormula ?? '0'),
         selfGaugeAChange: Number.isFinite(Number(sk?.selfGaugeAChange)) ? Number(sk.selfGaugeAChange) : 0,
         selfGaugeBChange: Number.isFinite(Number(sk?.selfGaugeBChange)) ? Number(sk.selfGaugeBChange) : 0,
         targetGaugeAChange: Number.isFinite(Number(sk?.targetGaugeAChange)) ? Number(sk.targetGaugeAChange) : 0,
         targetGaugeBChange: Number.isFinite(Number(sk?.targetGaugeBChange)) ? Number(sk.targetGaugeBChange) : 0,
-        applyStatusId: String(sk?.applyStatusId || ''),
-        applyStatusChance: clamp(sk?.applyStatusChance ?? 100, 0, 100),
-        applyStatusTarget: sk?.applyStatusTarget === 'self' ? 'self' : 'target',
-        requiredTargetStatusIds: Array.isArray(sk?.requiredTargetStatusIds)
-            ? sk.requiredTargetStatusIds.map(String).filter(Boolean)
-            : [],
+        applyStatuses,
+        requiredTargetStatusIds: normalizeIdList(sk?.requiredTargetStatusIds),
+        requiredSelfStatusIds: normalizeIdList(sk?.requiredSelfStatusIds),
         aiPriority: Math.max(1, Math.round(Number(sk?.aiPriority ?? 10) || 10)),
         aiHpBelowPercent: clamp(sk?.aiHpBelowPercent ?? 100, 1, 100),
     };
@@ -201,7 +245,7 @@ export function normalizeClassNode(rawCls, idx = 0) {
 }
 
 /**
- * 规范化单件装备（v1.5 新增 bonusSpi 精神加成、bonusMdef 法抗加成）
+ * 规范化单件装备（v1.6：支持解锁多个专属技能 grantSkillIds、附带多个常驻 Buff passiveStatusIds）
  */
 export function normalizeEquipment(rawEquip, idx = 0) {
     const defaultId = `equip_${String(idx + 1).padStart(2, '0')}`;
@@ -217,16 +261,22 @@ export function normalizeEquipment(rawEquip, idx = 0) {
         bonusSpi: Math.round(Number(rawEquip?.bonusSpi ?? 0) || 0),
         bonusDef: Math.round(Number(rawEquip?.bonusDef ?? 0) || 0),
         bonusMdef: Math.round(Number(rawEquip?.bonusMdef ?? 0) || 0),
-        grantSkillId: String(rawEquip?.grantSkillId || ''),
-        passiveStatusId: String(rawEquip?.passiveStatusId || ''),
+        grantSkillIds: normalizeIdList(rawEquip?.grantSkillIds, rawEquip?.grantSkillId),
+        passiveStatusIds: normalizeIdList(rawEquip?.passiveStatusIds, rawEquip?.passiveStatusId),
     };
 }
 
 /**
- * 规范化单个道具
+ * 规范化单个道具（v1.6：支持附加多个状态 applyStatuses）
  */
 export function normalizeItem(rawItem, idx = 0) {
     const defaultId = `item_${String(idx + 1).padStart(2, '0')}`;
+    const applyStatuses = normalizeApplyStatuses(
+        rawItem?.applyStatuses,
+        rawItem?.applyStatusId,
+        rawItem?.applyStatusChance,
+        'target'
+    );
     return {
         id: String(rawItem?.id || defaultId).trim() || defaultId,
         name: String(rawItem?.name ?? defaultId).trim() || defaultId,
@@ -242,8 +292,7 @@ export function normalizeItem(rawItem, idx = 0) {
         formula: String(rawItem?.formula ?? '30'),
         targetGaugeAChange: Number.isFinite(Number(rawItem?.targetGaugeAChange)) ? Number(rawItem.targetGaugeAChange) : 0,
         targetGaugeBChange: Number.isFinite(Number(rawItem?.targetGaugeBChange)) ? Number(rawItem.targetGaugeBChange) : 0,
-        applyStatusId: String(rawItem?.applyStatusId || ''),
-        applyStatusChance: clamp(rawItem?.applyStatusChance ?? 100, 0, 100),
+        applyStatuses,
         consumesTurn: rawItem?.consumesTurn !== false,
     };
 }
@@ -364,7 +413,7 @@ export function normalizeConfig(rawConfig, defaults) {
             defMultiplier: Number.isFinite(Number(st?.defMultiplier)) ? Number(st.defMultiplier) : 1,
             mdefMultiplier: Number.isFinite(Number(st?.mdefMultiplier)) ? Number(st.mdefMultiplier) : 1,
             duration: Math.max(1, Math.round(Number(st?.duration ?? 1) || 1)),
-            onExpireStatusId: String(st?.onExpireStatusId || ''),
+            onExpireStatusIds: normalizeIdList(st?.onExpireStatusIds, st?.onExpireStatusId),
         };
     });
 
@@ -401,7 +450,7 @@ export function normalizeConfig(rawConfig, defaults) {
         operator: ['<=', '<', '>=', '>', '=='].includes(r?.operator) ? r.operator : '<=',
         threshold: Number.isFinite(Number(r?.threshold)) ? Number(r.threshold) : 0,
         statusId: String(r?.statusId || ''),
-        grantStatusId: String(r?.grantStatusId || ''),
+        grantStatusIds: normalizeIdList(r?.grantStatusIds, r?.grantStatusId),
         grantStatusMode: r?.grantStatusMode === 'on_enter' ? 'on_enter' : 'while_condition',
         resetGaugeOnTrigger: ['gauge_a', 'gauge_b'].includes(r?.resetGaugeOnTrigger) ? r.resetGaugeOnTrigger : '',
         position: ['in_chat', 'in_prompt', 'before_prompt'].includes(r?.position) ? r.position : 'in_chat',

@@ -29,6 +29,7 @@ import {
     findUnitById,
     formatCombatLogOutput,
     getEffectiveStats,
+    getSkillRemainingCooldown,
     getUnitAvailableSkills,
     grantSkillToUnit,
     isAlive,
@@ -123,13 +124,15 @@ function formatEquipBonusSummary(eq, config) {
     if (eq.bonusSpi) parts.push(`精${eq.bonusSpi > 0 ? '+' : ''}${eq.bonusSpi}`);
     if (eq.bonusDef) parts.push(`防${eq.bonusDef > 0 ? '+' : ''}${eq.bonusDef}`);
     if (eq.bonusMdef) parts.push(`抗${eq.bonusMdef > 0 ? '+' : ''}${eq.bonusMdef}`);
-    if (eq.passiveStatusId) {
-        const st = findStatusDefById(config, eq.passiveStatusId);
-        if (st) parts.push(`常驻:${st.name}`);
+    const pIds = Array.isArray(eq.passiveStatusIds) ? eq.passiveStatusIds : (eq.passiveStatusId ? [eq.passiveStatusId] : []);
+    if (pIds.length > 0) {
+        const names = pIds.map(id => findStatusDefById(config, id)?.name).filter(Boolean);
+        if (names.length) parts.push(`常驻:${names.join('/')}`);
     }
-    if (eq.grantSkillId) {
-        const sk = (config.skills || []).find(s => s.id === eq.grantSkillId);
-        if (sk) parts.push(`附技:${sk.name}`);
+    const gIds = Array.isArray(eq.grantSkillIds) ? eq.grantSkillIds : (eq.grantSkillId ? [eq.grantSkillId] : []);
+    if (gIds.length > 0) {
+        const names = gIds.map(id => (config.skills || []).find(s => s.id === id)?.name).filter(Boolean);
+        if (names.length) parts.push(`附技:${names.join('/')}`);
     }
     return parts.join(' ') || '无额外加成';
 }
@@ -779,15 +782,16 @@ export async function initHudUI(deps) {
             } else {
                 elSkillsBar.innerHTML = availSkills.map(({ skill: sk, fromEquipmentName, fromClassName }) => {
                     const lackMp = actor && actor.mp < sk.mpCost;
+                    const remCd = actor ? getSkillRemainingCooldown(actor, sk.id) : 0;
                     const preCheck = actor ? checkSkillPrerequisite(state, config, actor, sk, state.selectedTargetId) : { ok: true };
                     const disabled = !canAct || lackMp || !preCheck.ok;
                     const typeBadge = TARGET_TYPE_BADGES[sk.targetType] || '';
                     const srcTag = fromEquipmentName ? ` · 🛡️${fromEquipmentName}` : (fromClassName ? ` · 🎓${fromClassName}` : '');
-                    const lockTag = !preCheck.ok ? ' · 🔒需前置状态' : '';
-                    const tip = `${sk.description || sk.name}｜消耗 ${sk.mpCost} MP｜公式：${sk.formula}${!preCheck.ok ? `｜⚠️ ${preCheck.reason}` : ''}`;
+                    const lockTag = remCd > 0 ? ` · ⏳CD ${remCd}T` : (!preCheck.ok ? ' · 🔒需前置' : '');
+                    const tip = `${sk.description || sk.name}｜消耗 ${sk.mpCost} MP${sk.cooldown ? `｜冷却 ${sk.cooldown}T` : ''}｜公式：${sk.formula}${!preCheck.ok ? `｜⚠️ ${preCheck.reason}` : ''}`;
                     return `
                         <button type="button" class="stcf-skill-btn" data-skill-id="${escapeHtml(sk.id)}" ${disabled ? 'disabled' : ''} title="${escapeHtml(tip)}">
-                            <span class="stcf-skill-name">${!preCheck.ok ? '🔒 ' : ''}${escapeHtml(sk.name)}</span>
+                            <span class="stcf-skill-name">${remCd > 0 ? '⏳ ' : (!preCheck.ok ? '🔒 ' : '')}${escapeHtml(sk.name)}</span>
                             <span class="stcf-skill-meta">${typeBadge}${sk.mpCost > 0 ? ` · ${sk.mpCost}MP` : ''}${escapeHtml(srcTag)}${lockTag}</span>
                         </button>
                     `;

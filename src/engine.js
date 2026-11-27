@@ -312,11 +312,17 @@ export function getUnitEquipmentBonuses(unit, config) {
         bonusSpi += Number(eq.bonusSpi || 0);
         bonusDef += Number(eq.bonusDef || 0);
         bonusMdef += Number(eq.bonusMdef || 0);
-        if (eq.grantSkillId) {
-            grantedSkills.push({ skillId: eq.grantSkillId, equipName: eq.name });
+        const gSkills = Array.isArray(eq.grantSkillIds)
+            ? eq.grantSkillIds
+            : (eq.grantSkillId ? [eq.grantSkillId] : []);
+        for (const sid of gSkills) {
+            if (sid) grantedSkills.push({ skillId: sid, equipName: eq.name });
         }
-        if (eq.passiveStatusId) {
-            passiveStatuses.push({ statusId: eq.passiveStatusId, equipId: eq.id, equipName: eq.name });
+        const pStatuses = Array.isArray(eq.passiveStatusIds)
+            ? eq.passiveStatusIds
+            : (eq.passiveStatusId ? [eq.passiveStatusId] : []);
+        for (const stId of pStatuses) {
+            if (stId) passiveStatuses.push({ statusId: stId, equipId: eq.id, equipName: eq.name });
         }
     }
 
@@ -537,6 +543,7 @@ function instantiateUnit(tpl, side, config) {
         equipmentIds: Array.isArray(tpl.equipmentIds) ? [...tpl.equipmentIds] : [],
         aiStrategy: ['priority', 'weighted', 'random'].includes(tpl.aiStrategy) ? tpl.aiStrategy : 'priority',
         autoControl: side === 'ally' ? Boolean(tpl.autoControl) : false,
+        cooldowns: {}, // { [skillId]: remainingTurns }
         statuses: [],
         hasActed: false,
     };
@@ -854,15 +861,53 @@ function buildFormulaVars(actor, target, config) {
 }
 
 /**
- * 检查技能的前置状态条件：要求目标至少持有 requiredTargetStatusIds 中的任意 1 个状态
- * @param {object} state
- * @param {object} config
- * @param {object} actor
- * @param {object} skill
- * @param {string} targetId
- * @returns {{ ok: boolean, reason?: string }}
+ * 获取技能/道具规范化后的多状态附加列表（兼容旧单字段）
+ */
+function getApplyStatusEntries(obj) {
+    if (Array.isArray(obj?.applyStatuses)) {
+        return obj.applyStatuses.filter(e => e && e.statusId);
+    }
+    if (obj?.applyStatusId) {
+        return [{
+            statusId: obj.applyStatusId,
+            chance: obj.applyStatusChance ?? 100,
+            target: obj.applyStatusTarget === 'self' ? 'self' : 'target',
+        }];
+    }
+    return [];
+}
+
+/**
+ * 获取单位某技能当前剩余冷却回合数
+ */
+export function getSkillRemainingCooldown(unit, skillId) {
+    return Math.max(0, Math.round(Number(unit?.cooldowns?.[skillId] || 0)));
+}
+
+/**
+ * 检查技能的前置条件：
+ * 1. 冷却回合检查 (cooldown)
+ * 2. 自身前置状态检查 (requiredSelfStatusIds：自身持有任一指定状态)
+ * 3. 目标前置状态检查 (requiredTargetStatusIds：目标持有任一指定状态)
  */
 export function checkSkillPrerequisite(state, config, actor, skill, targetId) {
+    const cd = getSkillRemainingCooldown(actor, skill?.id);
+    if (cd > 0) {
+        return { ok: false, reason: `冷却中（剩余 ${cd} 回合）` };
+    }
+
+    const reqSelfIds = Array.isArray(skill?.requiredSelfStatusIds)
+        ? skill.requiredSelfStatusIds.filter(Boolean)
+        : [];
+    if (reqSelfIds.length > 0) {
+        const selfSet = new Set(reqSelfIds);
+        const selfOk = (actor?.statuses || []).some(st => selfSet.has(st.statusId));
+        if (!selfOk) {
+            const names = reqSelfIds.map(id => findStatusDefById(config, id)?.name || id).join(' / ');
+            return { ok: false, reason: `需要自身持有【${names}】之一才可释放` };
+        }
+    }
+
     const reqIds = Array.isArray(skill?.requiredTargetStatusIds)
         ? skill.requiredTargetStatusIds.filter(Boolean)
         : [];
@@ -905,16 +950,39 @@ function performSkill(state, config, actor, skill, targetId) {
 
     actor.mp = Math.max(0, actor.mp - skill.mpCost);
     actor.hasActed = true;
+    if ((Number(skill.cooldown) || 0) > 0) {
+        if (!actor.cooldowns || typeof actor.cooldowns !== 'object') actor.cooldowns = {};
+        actor.cooldowns[skill.id] = Math.round(Number(skill.cooldown));
+    }
 
     const selfNotes = [];
+
+    // v1.6：自身 HP 变化公式（负数=卖血/献祭消耗，正数=吸血/自愈）
+    const selfHpFormulaStr = String(skill.selfHpFormula || '0').trim();
+    if (selfHpFormulaStr && selfHpFormulaStr !== '0') {
+        const selfVars = buildFormulaVars(actor, targets[0], config);
+        const selfHpDelta = Math.round(evaluateFormula(selfHpFormulaStr, selfVars));
+        if (selfHpDelta !== 0) {
+            const before = actor.hp;
+            actor.hp = clamp(actor.hp + selfHpDelta, 0, actor.maxHp);
+            const diff = actor.hp - before;
+            if (diff < 0) selfNotes.push(`消耗 ${Math.abs(diff)} HP(${actor.hp}/${actor.maxHp})`);
+            else if (diff > 0) selfNotes.push(`吸取/回复 ${diff} HP(${actor.hp}/${actor.maxHp})`);
+        }
+    }
+
     const selfGA = applyGaugeDelta(actor, 'gauge_a', skill.selfGaugeAChange, config);
     const selfGB = applyGaugeDelta(actor, 'gauge_b', skill.selfGaugeBChange, config);
     if (selfGA) selfNotes.push(selfGA);
     if (selfGB) selfNotes.push(selfGB);
 
-    if (skill.applyStatusId && skill.applyStatusTarget === 'self') {
-        const stText = tryApplyStatus(actor, skill.applyStatusId, skill.applyStatusChance, config);
-        if (stText) selfNotes.push(stText);
+    // v1.6：支持同时向自身附加多个状态
+    const applyEntries = getApplyStatusEntries(skill);
+    for (const entry of applyEntries) {
+        if (entry.target === 'self') {
+            const stText = tryApplyStatus(actor, entry.statusId, entry.chance, config);
+            if (stText) selfNotes.push(stText);
+        }
     }
 
     const targetSummaries = [];
@@ -943,9 +1011,12 @@ function performSkill(state, config, actor, skill, targetId) {
         if (tGA) notes.push(tGA);
         if (tGB) notes.push(tGB);
 
-        if (skill.applyStatusId && skill.applyStatusTarget !== 'self') {
-            const stText = tryApplyStatus(target, skill.applyStatusId, skill.applyStatusChance, config);
-            if (stText) notes.push(stText);
+        // v1.6：支持同时向目标附加多个状态
+        for (const entry of applyEntries) {
+            if (entry.target !== 'self') {
+                const stText = tryApplyStatus(target, entry.statusId, entry.chance, config);
+                if (stText) notes.push(stText);
+            }
         }
 
         targetSummaries.push(`对 ${target.name} ${notes.length ? notes.join('，') : '生效'}`);
@@ -1031,6 +1102,12 @@ export function pickAiSkillAndTarget(state, config, actor) {
     const actorHpPct = actor.maxHp > 0 ? (actor.hp / actor.maxHp) * 100 : 100;
 
     const pickTargetForSkill = (sk) => {
+        if (getSkillRemainingCooldown(actor, sk.id) > 0) return null;
+        const reqSelfIds = Array.isArray(sk.requiredSelfStatusIds) ? sk.requiredSelfStatusIds.filter(Boolean) : [];
+        if (reqSelfIds.length > 0) {
+            const selfSet = new Set(reqSelfIds);
+            if (!(actor.statuses || []).some(st => selfSet.has(st.statusId))) return null;
+        }
         const reqIds = Array.isArray(sk.requiredTargetStatusIds) ? sk.requiredTargetStatusIds.filter(Boolean) : [];
         const reqSet = new Set(reqIds);
         const hasReq = (u) => reqSet.size === 0 || (u.statuses || []).some(st => reqSet.has(st.statusId));
@@ -1225,8 +1302,8 @@ export function executeUseItem(state, config, actorId, itemId, targetId) {
         if (tGA) notes.push(tGA);
         if (tGB) notes.push(tGB);
 
-        if (item.applyStatusId) {
-            const stText = tryApplyStatus(target, item.applyStatusId, item.applyStatusChance, config);
+        for (const entry of getApplyStatusEntries(item)) {
+            const stText = tryApplyStatus(target, entry.statusId, entry.chance, config);
             if (stText) notes.push(stText);
         }
 
@@ -1296,8 +1373,11 @@ export function equipItemOnUnit(state, config, unitId, equipId) {
     const tpl = (tplList || []).find(u => u.id === unit.id);
     if (tpl) tpl.equipmentIds = [...unit.equipmentIds];
 
-    const buffDef = equip.passiveStatusId ? findStatusDefById(config, equip.passiveStatusId) : null;
-    const buffNote = buffDef ? `，获得常驻状态「${buffDef.name}」` : '';
+    const pStatusIds = Array.isArray(equip.passiveStatusIds)
+        ? equip.passiveStatusIds
+        : (equip.passiveStatusId ? [equip.passiveStatusId] : []);
+    const buffNames = pStatusIds.map(id => findStatusDefById(config, id)?.name).filter(Boolean);
+    const buffNote = buffNames.length ? `，获得常驻状态「${buffNames.join('、')}」` : '';
     const replaceNote = replacedName ? `（替换了「${replacedName}」）` : '';
     appendBattleLog(state, `${unit.name} 装备了「${equip.name}」${replaceNote}${buffNote}。`);
 
@@ -1443,19 +1523,25 @@ function runRoundEndSettlement(state, config) {
                 if (activeSt.remainingTurns > 0) {
                     remainingStatuses.push(activeSt);
                 } else {
-                    // v1.2：状态倒计时结束时，支持自动转化为另一个新状态
-                    const nextDef = (isAlive(unit) && def.onExpireStatusId)
-                        ? findStatusDefById(config, def.onExpireStatusId)
-                        : null;
-                    if (nextDef) {
-                        transformedStatuses.push({
-                            statusId: nextDef.id,
-                            remainingTurns: nextDef.duration,
-                            source: 'normal',
-                        });
+                    // v1.6：状态倒计时结束时，支持同时转化为多个新状态 (onExpireStatusIds)
+                    const nextIds = Array.isArray(def.onExpireStatusIds)
+                        ? def.onExpireStatusIds
+                        : (def.onExpireStatusId ? [def.onExpireStatusId] : []);
+                    const nextDefs = isAlive(unit)
+                        ? nextIds.map(id => findStatusDefById(config, id)).filter(Boolean)
+                        : [];
+                    if (nextDefs.length > 0) {
+                        for (const nd of nextDefs) {
+                            transformedStatuses.push({
+                                statusId: nd.id,
+                                remainingTurns: nd.duration,
+                                source: 'normal',
+                            });
+                        }
+                        const namesStr = nextDefs.map(nd => `「${nd.name}」(${nd.duration}回合)`).join('、');
                         appendBattleLog(
                             state,
-                            `${unit.name} 的状态「${def.name}」结束，转化为「${nextDef.name}」(${nextDef.duration}回合)！`
+                            `${unit.name} 的状态「${def.name}」结束，转化为 ${namesStr}！`
                         );
                     } else {
                         appendBattleLog(state, `${unit.name} 身上的状态「${def.name}」已失效移除。`);
@@ -1476,6 +1562,14 @@ function runRoundEndSettlement(state, config) {
             }
 
             unit.statuses = remainingStatuses;
+        }
+
+        // 1.5 v1.6：每回合结束递减该单位所有技能冷却回合
+        if (unit.cooldowns && typeof unit.cooldowns === 'object') {
+            for (const skId of Object.keys(unit.cooldowns)) {
+                unit.cooldowns[skId] = Math.max(0, (Number(unit.cooldowns[skId]) || 0) - 1);
+                if (unit.cooldowns[skId] <= 0) delete unit.cooldowns[skId];
+            }
         }
 
         // 2. v1.2：结算特殊状态条的每回合自动增减（仅对存活单位生效）

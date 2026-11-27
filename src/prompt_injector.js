@@ -166,9 +166,13 @@ function syncThresholdBuffs(battleState, config) {
     }
 
     for (const rule of config.triggerRules || []) {
-        if (!rule.enabled || !rule.grantStatusId) continue;
-        const statusDef = findStatusDefById(config, rule.grantStatusId);
-        if (!statusDef) continue;
+        const grantIds = Array.isArray(rule.grantStatusIds)
+            ? rule.grantStatusIds
+            : (rule.grantStatusId ? [rule.grantStatusId] : []);
+        if (!rule.enabled || grantIds.length === 0) continue;
+
+        const statusDefs = grantIds.map(id => findStatusDefById(config, id)).filter(Boolean);
+        if (statusDefs.length === 0) continue;
 
         const { matched, matchedUnits } = evaluateRule(battleState, rule);
         if (!matched) continue;
@@ -179,17 +183,19 @@ function syncThresholdBuffs(battleState, config) {
 
             if (rule.grantStatusMode === 'on_enter') {
                 if (!prevEnteredSet.has(pairKey)) {
-                    const existing = (unit.statuses || []).find(
-                        s => s.statusId === statusDef.id && (!s.source || s.source === 'normal')
-                    );
-                    if (existing) {
-                        existing.remainingTurns = Math.max(existing.remainingTurns, statusDef.duration);
-                    } else {
-                        unit.statuses.push({
-                            statusId: statusDef.id,
-                            remainingTurns: statusDef.duration,
-                            source: 'normal',
-                        });
+                    for (const statusDef of statusDefs) {
+                        const existing = (unit.statuses || []).find(
+                            s => s.statusId === statusDef.id && (!s.source || s.source === 'normal')
+                        );
+                        if (existing) {
+                            existing.remainingTurns = Math.max(existing.remainingTurns, statusDef.duration);
+                        } else {
+                            unit.statuses.push({
+                                statusId: statusDef.id,
+                                remainingTurns: statusDef.duration,
+                                source: 'normal',
+                            });
+                        }
                     }
                     let resetNote = '';
                     if (rule.resetGaugeOnTrigger === 'gauge_a' || rule.resetGaugeOnTrigger === 'gauge_b') {
@@ -199,31 +205,38 @@ function syncThresholdBuffs(battleState, config) {
                     } else {
                         nextEnteredSet.add(pairKey);
                     }
+                    const namesStr = statusDefs.map(d => `「${d.name}」(${d.duration}回合)`).join('、');
                     appendBattleLog(
                         battleState,
-                        `⚡ 触发规则「${rule.name}」：${unit.name} 获得状态「${statusDef.name}」(${statusDef.duration}回合)${resetNote}！`
+                        `⚡ 触发规则「${rule.name}」：${unit.name} 获得状态 ${namesStr}${resetNote}！`
                     );
                 } else {
                     nextEnteredSet.add(pairKey);
                 }
             } else {
-                const key = `${rule.id}::${statusDef.id}`;
-                desiredWhileKeysByUnit.get(unit.id)?.add(key);
+                const newlyAdded = [];
+                for (const statusDef of statusDefs) {
+                    const key = `${rule.id}::${statusDef.id}`;
+                    desiredWhileKeysByUnit.get(unit.id)?.add(key);
 
-                const exists = (unit.statuses || []).some(
-                    s => s.source === 'threshold' && s.sourceRuleId === rule.id && s.statusId === statusDef.id
-                );
-                if (!exists) {
-                    unit.statuses.push({
-                        statusId: statusDef.id,
-                        remainingTurns: 99,
-                        source: 'threshold',
-                        sourceRuleId: rule.id,
-                        sourceLabel: rule.name,
-                    });
+                    const exists = (unit.statuses || []).some(
+                        s => s.source === 'threshold' && s.sourceRuleId === rule.id && s.statusId === statusDef.id
+                    );
+                    if (!exists) {
+                        unit.statuses.push({
+                            statusId: statusDef.id,
+                            remainingTurns: 99,
+                            source: 'threshold',
+                            sourceRuleId: rule.id,
+                            sourceLabel: rule.name,
+                        });
+                        newlyAdded.push(`「${statusDef.name}」`);
+                    }
+                }
+                if (newlyAdded.length > 0) {
                     appendBattleLog(
                         battleState,
-                        `⚡ 触发规则「${rule.name}」：${unit.name} 获得阈值状态「${statusDef.name}」！`
+                        `⚡ 触发规则「${rule.name}」：${unit.name} 获得阈值状态 ${newlyAdded.join('、')}！`
                     );
                 }
             }

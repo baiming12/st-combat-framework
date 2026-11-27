@@ -1,9 +1,14 @@
 /**
- * 扩展侧边栏可视化配置面板模块 (src/settings_ui.js) - v1.1
- * 职责：
- * 1. 全可视化零代码编辑：角色(4v4)、技能、装备（含附带技能与常驻 Buff）、道具、状态、阈值规则（含自动 Buff + Prompt 注入）
- * 2. 支持「按角色卡独立保存方案」与「粘贴 JSON 增量合并导入」（完美配合写卡助手）
- * 3. 所有修改即时保存并同步刷新战斗 HUD 与提示词注入状态
+ * 扩展侧边栏可视化配置面板模块 (src/settings_ui.js) - v1.6
+ * 特性：
+ * 1. 所有条目卡片与大段多选区均采用原生 <details> 折叠面板，默认全部折叠，彻底解决长列表难翻页问题
+ * 2. 新增条目时自动展开该新条目；各分区提供一键「展开全部 / 折叠全部」快捷按钮
+ * 3. 全链路多状态与高创作自由度：
+ *    - 技能：多附加状态(各自概率与施加对象)、自身卖血/吸血公式、冷却CD、自身与目标前置状态
+ *    - 状态/Buff：到期同时转化为多个新状态
+ *    - 装备：附带多个常驻 Buff + 解锁多个专属技能
+ *    - 道具：附加多个状态
+ *    - 阈值规则：达标同时挂载多个 Buff
  */
 
 import {
@@ -17,6 +22,16 @@ import {
     saveAsGlobalTemplate,
     saveConfig,
 } from './config.js';
+
+const POOL_LABELS = { class: '🎓职业', universal: '🌐通用', monster: '👹怪物' };
+const SLOT_LABELS = { weapon: '武器', head: '头部', body: '防具', accessory: '饰品' };
+const TARGET_LABELS = {
+    single_enemy: '单敌',
+    all_enemies: '群敌',
+    self: '自身',
+    single_ally: '单友',
+    all_allies: '群友',
+};
 
 function escapeHtml(str) {
     return String(str ?? '')
@@ -34,6 +49,15 @@ function makeUniqueId(prefix, existingItems) {
         n++;
     }
     return `${prefix}_${String(n).padStart(2, '0')}`;
+}
+
+/** 收集某个容器里当前展开的卡片 key，避免增删内部子项时误合上正在编辑的卡片 */
+function captureOpenCardKeys(hostEl) {
+    const openSet = new Set();
+    hostEl?.querySelectorAll('details.stcf-fold[open][data-card-key]').forEach(d => {
+        openSet.add(d.dataset.cardKey);
+    });
+    return openSet;
 }
 
 export async function initSettingsUI(deps) {
@@ -75,6 +99,34 @@ export async function initSettingsUI(deps) {
         });
     });
 
+    // 为所有编辑列表头部自动注入「全部展开 / 全部折叠」快捷小按钮
+    const editorHostIds = [
+        'stcf-classes-editor',
+        'stcf-allies-editor',
+        'stcf-enemies-editor',
+        'stcf-skills-editor',
+        'stcf-equipments-editor',
+        'stcf-items-editor',
+        'stcf-statuses-editor',
+        'stcf-rules-editor',
+    ];
+    for (const hostId of editorHostIds) {
+        const host = container.querySelector(`#${hostId}`);
+        const header = host?.parentElement?.querySelector('.stcf-section-header');
+        if (!host || !header) continue;
+        const toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'menu_button stcf-sm-btn';
+        toggleBtn.textContent = '↕ 展开/折叠';
+        toggleBtn.title = '一键展开或折叠本列表中的所有卡片';
+        toggleBtn.addEventListener('click', () => {
+            const cards = [...host.querySelectorAll('details.stcf-fold')];
+            const anyClosed = cards.some(d => !d.open);
+            cards.forEach(d => { d.open = anyClosed; });
+        });
+        header.appendChild(toggleBtn);
+    }
+
     const elProfileBanner = container.querySelector('#stcf-profile-banner');
     const elIoStatus = container.querySelector('#stcf-io-status');
     function setIoStatus(msg, isError = false) {
@@ -83,11 +135,18 @@ export async function initSettingsUI(deps) {
         elIoStatus.classList.toggle('stcf-text-error', isError);
     }
 
-    function commitChange(reRenderLists = false) {
+    /** 刚新增或正在编辑的卡片键（用于重绘后自动展开指定卡片，其余保持默认折叠） */
+    let forceOpenKey = '';
+
+    function commitChange(reRenderLists = false, openKey = '') {
+        if (openKey) forceOpenKey = openKey;
         const cfg = deps.getConfig();
         saveConfig(cfg);
         deps.onConfigChanged();
-        if (reRenderLists) renderAll();
+        if (reRenderLists) {
+            renderAll(true);
+            forceOpenKey = '';
+        }
     }
 
     // =========================================================================
@@ -124,7 +183,7 @@ export async function initSettingsUI(deps) {
         saveConfig(deps.getConfig());
         const reloaded = await loadConfig();
         deps.setConfig(reloaded);
-        renderAll();
+        renderAll(false);
         deps.onConfigChanged();
         setIoStatus(elPerChar.checked ? '✅ 已开启按角色卡独立保存方案' : '✅ 已切换为全局共用方案');
     });
@@ -150,7 +209,7 @@ export async function initSettingsUI(deps) {
     elGaugeBTick.addEventListener('input', () => { deps.getConfig().gauges.gauge_b.perTurnChange = Math.round(Number(elGaugeBTick.value) || 0); commitChange(); });
     elGaugeBScope.addEventListener('change', () => { deps.getConfig().gauges.gauge_b.perTurnScope = elGaugeBScope.value; commitChange(); });
 
-    // 内置西幻完整职业与技能包一键载入
+    // 内置西幻扩展包一键载入
     async function handleLoadWesternFantasy(mode) {
         if (mode === 'replace' && !window.confirm('确定要用「西幻」完整开团预设覆盖当前角色卡方案吗？（若想保留现有内容，请点增量合并）')) {
             return;
@@ -158,7 +217,7 @@ export async function initSettingsUI(deps) {
         try {
             const { config: nextCfg, summary } = await loadBuiltinPresetPack('western_fantasy_pack.json', mode, deps.getConfig());
             deps.setConfig(nextCfg);
-            renderAll();
+            renderAll(false);
             deps.onConfigChanged();
             setIoStatus(`🏰 已载入西幻扩展包：${summary}`);
         } catch (err) {
@@ -168,17 +227,14 @@ export async function initSettingsUI(deps) {
     container.querySelector('#stcf-btn-load-wf-merge')?.addEventListener('click', () => handleLoadWesternFantasy('merge'));
     container.querySelector('#stcf-btn-load-wf-replace')?.addEventListener('click', () => handleLoadWesternFantasy('replace'));
 
-    // 粘贴 JSON 导入（增量合并 / 完整覆盖）
+    // 粘贴 JSON 导入
     async function handlePasteImport(mode) {
         const text = elPasteJson.value.trim();
-        if (!text) {
-            setIoStatus('⚠️ 请先在文本框里粘贴 JSON 内容。', true);
-            return;
-        }
+        if (!text) { setIoStatus('⚠️ 请先在文本框里粘贴 JSON 内容。', true); return; }
         try {
             const { config: nextCfg, summary } = await importConfigFromJsonText(text, mode, deps.getConfig());
             deps.setConfig(nextCfg);
-            renderAll();
+            renderAll(false);
             deps.onConfigChanged();
             elPasteJson.value = '';
             setIoStatus(`✅ ${summary}`);
@@ -186,10 +242,9 @@ export async function initSettingsUI(deps) {
             setIoStatus(`❌ 导入失败：${err.message}`, true);
         }
     }
-
     container.querySelector('#stcf-btn-merge-paste').addEventListener('click', () => handlePasteImport('merge'));
     container.querySelector('#stcf-btn-replace-paste').addEventListener('click', () => {
-        if (!window.confirm('完整覆盖会替换当前方案的全部内容，确定继续吗？（若只想追加新装备/技能，请点「增量合并导入」）')) return;
+        if (!window.confirm('完整覆盖会替换当前方案的全部内容，确定继续吗？')) return;
         handlePasteImport('replace');
     });
 
@@ -202,14 +257,10 @@ export async function initSettingsUI(deps) {
     let pendingFileMode = 'replace';
     const elFileInput = container.querySelector('#stcf-file-import-json');
     container.querySelector('#stcf-btn-import-merge-file').addEventListener('click', () => {
-        pendingFileMode = 'merge';
-        elFileInput.value = '';
-        elFileInput.click();
+        pendingFileMode = 'merge'; elFileInput.value = ''; elFileInput.click();
     });
     container.querySelector('#stcf-btn-import-json').addEventListener('click', () => {
-        pendingFileMode = 'replace';
-        elFileInput.value = '';
-        elFileInput.click();
+        pendingFileMode = 'replace'; elFileInput.value = ''; elFileInput.click();
     });
     elFileInput.addEventListener('change', async () => {
         const file = elFileInput.files?.[0];
@@ -218,7 +269,7 @@ export async function initSettingsUI(deps) {
             const text = await file.text();
             const { config: imported, summary } = await importConfigFromJsonText(text, pendingFileMode, deps.getConfig());
             deps.setConfig(imported);
-            renderAll();
+            renderAll(false);
             deps.onConfigChanged();
             setIoStatus(`✅ ${file.name}：${summary}`);
         } catch (err) {
@@ -230,18 +281,56 @@ export async function initSettingsUI(deps) {
         saveAsGlobalTemplate(deps.getConfig());
         setIoStatus('⭐ 已将当前配置设为新角色卡的默认模板。');
     });
-
     container.querySelector('#stcf-btn-reset-default').addEventListener('click', async () => {
         if (!window.confirm('确定要恢复出厂默认配置吗？当前方案未导出的自定义内容将被覆盖。')) return;
         const fresh = await resetConfigToDefaults();
         deps.setConfig(fresh);
-        renderAll();
+        renderAll(false);
         deps.onConfigChanged();
         setIoStatus('✅ 已恢复为 default_config.json 默认配置。');
     });
 
     // =========================================================================
-    // 一点五、职业树、世界观开关与自由属性点设置（v1.5 新增）
+    // 公共辅助渲染函数
+    // =========================================================================
+    function collectAllWorldviews(cfg) {
+        const set = new Set(['通用']);
+        for (const c of cfg.classTrees || []) if (c.worldview) set.add(c.worldview);
+        for (const s of cfg.skills || []) if (s.worldview) set.add(s.worldview);
+        for (const w of cfg.progression?.enabledWorldviews || []) if (w) set.add(w);
+        return [...set];
+    }
+
+    function buildStatusSelectOptions(cfg, selectedId, emptyLabel = '无') {
+        return [
+            `<option value="">${emptyLabel}</option>`,
+            ...(cfg.statuses || []).map(st =>
+                `<option value="${escapeHtml(st.id)}" ${selectedId === st.id ? 'selected' : ''}>${escapeHtml(st.icon)} ${escapeHtml(st.name)} (${escapeHtml(st.id)})</option>`
+            ),
+        ].join('');
+    }
+
+    function buildSkillSelectOptions(cfg, selectedId, emptyLabel = '无') {
+        return [
+            `<option value="">${emptyLabel}</option>`,
+            ...(cfg.skills || []).map(sk =>
+                `<option value="${escapeHtml(sk.id)}" ${selectedId === sk.id ? 'selected' : ''}>[${escapeHtml(sk.worldview)}] ${escapeHtml(sk.name)} (${escapeHtml(sk.id)})</option>`
+            ),
+        ].join('');
+    }
+
+    function renderStatusCheckChips(cfg, selectedIds, attrName) {
+        const set = new Set(selectedIds || []);
+        return (cfg.statuses || []).map(st => `
+            <label class="stcf-chip-check">
+                <input type="checkbox" ${attrName}="${escapeHtml(st.id)}" ${set.has(st.id) ? 'checked' : ''}>
+                <span>${escapeHtml(st.icon)} ${escapeHtml(st.name)}</span>
+            </label>
+        `).join('') || '<span class="stcf-muted">暂无状态</span>';
+    }
+
+    // =========================================================================
+    // 一点五、职业树、世界观开关与自由属性点设置
     // =========================================================================
     const elProgEnabled = container.querySelector('#stcf-set-prog-enabled');
     const elPtsPerLv = container.querySelector('#stcf-set-pts-per-lv');
@@ -265,31 +354,19 @@ export async function initSettingsUI(deps) {
 
     container.querySelector('#stcf-btn-add-class').addEventListener('click', () => {
         const cfg = deps.getConfig();
+        const id = makeUniqueId('class', cfg.classTrees);
         cfg.classTrees.push({
-            id: makeUniqueId('class', cfg.classTrees),
+            id,
             worldview: '西幻',
             name: `新职业_${cfg.classTrees.length + 1}`,
             description: '自定义职业简介',
             parentClassId: '',
             requiredLevel: 1,
-            bonusHp: 10,
-            bonusMp: 0,
-            bonusAtk: 2,
-            bonusSpi: 2,
-            bonusDef: 1,
-            bonusMdef: 1,
+            bonusHp: 10, bonusMp: 0, bonusAtk: 2, bonusSpi: 2, bonusDef: 1, bonusMdef: 1,
             unlockSkills: [],
         });
-        commitChange(true);
+        commitChange(true, `cls:${id}`);
     });
-
-    function collectAllWorldviews(cfg) {
-        const set = new Set(['通用']);
-        for (const c of cfg.classTrees || []) if (c.worldview) set.add(c.worldview);
-        for (const s of cfg.skills || []) if (s.worldview) set.add(s.worldview);
-        for (const w of cfg.progression?.enabledWorldviews || []) if (w) set.add(w);
-        return [...set];
-    }
 
     function renderWorldviewsPicker() {
         const cfg = deps.getConfig();
@@ -313,9 +390,14 @@ export async function initSettingsUI(deps) {
         commitChange();
     });
 
-    function renderClassesList() {
+    function renderClassesList(preserveOpen) {
         const cfg = deps.getConfig();
+        const openSet = preserveOpen ? captureOpenCardKeys(elClassesEditor) : new Set();
+
         elClassesEditor.innerHTML = (cfg.classTrees || []).map((cls, idx) => {
+            const cardKey = `cls:${cls.id}`;
+            const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
+            const parentObj = cls.parentClassId ? (cfg.classTrees || []).find(x => x.id === cls.parentClassId) : null;
             const parentOpts = [
                 '<option value="">无（基础起始职业）</option>',
                 ...(cfg.classTrees || [])
@@ -333,36 +415,43 @@ export async function initSettingsUI(deps) {
             `).join('');
 
             return `
-                <div class="stcf-item-card" data-index="${idx}">
-                    <div class="stcf-item-head">
-                        <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(cls.name)}" placeholder="职业名称（如：元素法师）">
-                        <span class="stcf-id-tag">${escapeHtml(cls.id)}</span>
-                        <button type="button" class="stcf-del-btn" data-action="delete" title="删除职业">🗑️</button>
-                    </div>
-                    <div class="stcf-grid-3">
-                        <label class="stcf-mini-field"><span>所属世界观大组</span><input type="text" class="text_pole" data-field="worldview" value="${escapeHtml(cls.worldview)}" placeholder="西幻"></label>
-                        <label class="stcf-mini-field"><span>前置父职业(进阶用)</span><select class="text_pole" data-field="parentClassId">${parentOpts}</select></label>
-                        <label class="stcf-mini-field"><span>转职所需等级</span><input type="number" min="1" class="text_pole" data-field="requiredLevel" value="${cls.requiredLevel}"></label>
-                    </div>
-                    <div class="stcf-field-row">
-                        <input type="text" class="text_pole" data-field="description" value="${escapeHtml(cls.description)}" placeholder="职业定位简述">
-                    </div>
-                    <div class="stcf-grid-3">
-                        <label class="stcf-mini-field"><span>职业+HP</span><input type="number" class="text_pole" data-field="bonusHp" value="${cls.bonusHp}"></label>
-                        <label class="stcf-mini-field"><span>职业+MP</span><input type="number" class="text_pole" data-field="bonusMp" value="${cls.bonusMp}"></label>
-                        <label class="stcf-mini-field"><span>职业+物攻</span><input type="number" class="text_pole" data-field="bonusAtk" value="${cls.bonusAtk}"></label>
-                        <label class="stcf-mini-field"><span>职业+精神</span><input type="number" class="text_pole" data-field="bonusSpi" value="${cls.bonusSpi}"></label>
-                        <label class="stcf-mini-field"><span>职业+物防</span><input type="number" class="text_pole" data-field="bonusDef" value="${cls.bonusDef}"></label>
-                        <label class="stcf-mini-field"><span>职业+法抗</span><input type="number" class="text_pole" data-field="bonusMdef" value="${cls.bonusMdef}"></label>
-                    </div>
-                    <div class="stcf-skill-assign" style="margin-top:6px;">
-                        <div class="stcf-section-header" style="margin-bottom:4px;">
-                            <span class="stcf-sub-label" style="margin:0;">🎓 等级解锁技能列表（进阶自动继承父职业技能）：</span>
-                            <button type="button" class="menu_button stcf-sm-btn" data-action="add_unlock">➕ 添加解锁技能</button>
+                <details class="stcf-item-card stcf-fold" data-index="${idx}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
+                    <summary class="stcf-fold-summary">
+                        <span class="stcf-fold-title">🎓 [${escapeHtml(cls.worldview)}] ${parentObj ? `${escapeHtml(parentObj.name)}→` : ''}<strong>${escapeHtml(cls.name)}</strong> <small class="stcf-muted">Lv.${cls.requiredLevel} · ${(cls.unlockSkills || []).length}技</small></span>
+                        <span class="stcf-fold-right">
+                            <span class="stcf-id-tag">${escapeHtml(cls.id)}</span>
+                            <button type="button" class="stcf-del-btn" data-action="delete" title="删除职业">🗑️</button>
+                        </span>
+                    </summary>
+                    <div class="stcf-fold-body">
+                        <div class="stcf-field-row">
+                            <input type="text" class="text_pole" data-field="name" value="${escapeHtml(cls.name)}" placeholder="职业名称">
                         </div>
-                        ${unlockRows || '<div class="stcf-muted">暂未配置职业解锁技能</div>'}
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>世界观大组</span><input type="text" class="text_pole" data-field="worldview" value="${escapeHtml(cls.worldview)}"></label>
+                            <label class="stcf-mini-field"><span>前置父职业</span><select class="text_pole" data-field="parentClassId">${parentOpts}</select></label>
+                            <label class="stcf-mini-field"><span>转职等级</span><input type="number" min="1" class="text_pole" data-field="requiredLevel" value="${cls.requiredLevel}"></label>
+                        </div>
+                        <div class="stcf-field-row">
+                            <input type="text" class="text_pole" data-field="description" value="${escapeHtml(cls.description)}" placeholder="职业定位简述">
+                        </div>
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>职业+HP</span><input type="number" class="text_pole" data-field="bonusHp" value="${cls.bonusHp}"></label>
+                            <label class="stcf-mini-field"><span>职业+MP</span><input type="number" class="text_pole" data-field="bonusMp" value="${cls.bonusMp}"></label>
+                            <label class="stcf-mini-field"><span>职业+物攻</span><input type="number" class="text_pole" data-field="bonusAtk" value="${cls.bonusAtk}"></label>
+                            <label class="stcf-mini-field"><span>职业+精神</span><input type="number" class="text_pole" data-field="bonusSpi" value="${cls.bonusSpi}"></label>
+                            <label class="stcf-mini-field"><span>职业+物防</span><input type="number" class="text_pole" data-field="bonusDef" value="${cls.bonusDef}"></label>
+                            <label class="stcf-mini-field"><span>职业+法抗</span><input type="number" class="text_pole" data-field="bonusMdef" value="${cls.bonusMdef}"></label>
+                        </div>
+                        <details class="stcf-sub-fold">
+                            <summary>🎓 等级解锁技能列表（已配 ${(cls.unlockSkills || []).length} 项）</summary>
+                            <div class="stcf-sub-body">
+                                <button type="button" class="menu_button stcf-sm-btn" data-action="add_unlock" style="margin-bottom:6px;">➕ 添加解锁技能</button>
+                                ${unlockRows || '<div class="stcf-muted">暂未配置职业解锁技能</div>'}
+                            </div>
+                        </details>
                     </div>
-                </div>
+                </details>
             `;
         }).join('');
     }
@@ -372,18 +461,14 @@ export async function initSettingsUI(deps) {
         if (!card) return;
         const cls = deps.getConfig().classTrees[Number(card.dataset.index)];
         if (!cls) return;
-        if (e.target.dataset.unlockField) {
+        if (e.target.dataset.unlockField === 'level') {
             const row = e.target.closest('.stcf-unlock-row');
             const u = cls.unlockSkills[Number(row.dataset.unlockIndex)];
-            if (u && e.target.dataset.unlockField === 'level') {
-                u.level = Math.max(1, Math.round(Number(e.target.value) || 1));
-                commitChange();
-            }
+            if (u) { u.level = Math.max(1, Math.round(Number(e.target.value) || 1)); commitChange(); }
             return;
         }
         if (!e.target.dataset.field) return;
-        const field = e.target.dataset.field;
-        cls[field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
+        cls[e.target.dataset.field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
         commitChange();
     });
     elClassesEditor.addEventListener('change', (e) => {
@@ -403,7 +488,7 @@ export async function initSettingsUI(deps) {
         if (!e.target.dataset.field) return;
         const field = e.target.dataset.field;
         cls[field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
-        commitChange(field === 'worldview' || field === 'name');
+        commitChange(field === 'worldview' || field === 'name' || field === 'parentClassId');
     });
     elClassesEditor.addEventListener('click', (e) => {
         const card = e.target.closest('.stcf-item-card');
@@ -412,6 +497,7 @@ export async function initSettingsUI(deps) {
         const cls = deps.getConfig().classTrees[idx];
         if (!cls) return;
         if (e.target.closest('[data-action="delete"]')) {
+            e.preventDefault();
             deps.getConfig().classTrees.splice(idx, 1);
             commitChange(true);
         } else if (e.target.closest('[data-action="add_unlock"]')) {
@@ -426,7 +512,7 @@ export async function initSettingsUI(deps) {
     });
 
     // =========================================================================
-    // 二、参战角色（我方 1~4 / 敌方图鉴，含等级/职业/精神/法抗/技能与装备勾选）
+    // 二、参战角色（我方 1~4 / 敌方图鉴，默认折叠）
     // =========================================================================
     const elAlliesEditor = container.querySelector('#stcf-allies-editor');
     const elEnemiesEditor = container.querySelector('#stcf-enemies-editor');
@@ -438,8 +524,9 @@ export async function initSettingsUI(deps) {
             window.alert(`我方最多支持 ${MAX_UNITS_PER_SIDE} 名参战角色（最多 4v4）。`);
             return;
         }
+        const id = makeUniqueId(side, list);
         list.push({
-            id: makeUniqueId(side, list),
+            id,
             enabled: side === 'ally' ? true : list.filter(x => x.enabled).length < MAX_UNITS_PER_SIDE,
             name: side === 'ally' ? `我方角色${list.length + 1}` : `敌方目标${list.length + 1}`,
             description: side === 'ally' ? '我方参战成员简短定位说明' : '敌方单位外观特征与战斗风格简述',
@@ -447,32 +534,29 @@ export async function initSettingsUI(deps) {
             classId: side === 'ally' ? (cfg.classTrees?.[0]?.id || '') : '',
             freePoints: side === 'ally' ? (cfg.progression?.pointsPerLevel ?? 3) : 0,
             allocated: { vit: 0, str: 0, spi: 0, def: 0, mdef: 0 },
-            maxHp: 100,
-            maxMp: 50,
-            atk: 20,
-            spi: 15,
-            def: 8,
-            mdef: 6,
-            initialGaugeA: 0,
-            initialGaugeB: 0,
+            maxHp: 100, maxMp: 50, atk: 20, spi: 15, def: 8, mdef: 6,
+            initialGaugeA: 0, initialGaugeB: 0,
             skillIds: cfg.skills[0] ? [cfg.skills[0].id] : [],
             equipmentIds: [],
             aiStrategy: 'priority',
             autoControl: false,
         });
-        commitChange(true);
+        commitChange(true, `${side}:${id}`);
     }
-
     container.querySelector('#stcf-btn-add-ally').addEventListener('click', () => addUnit('ally'));
     container.querySelector('#stcf-btn-add-enemy').addEventListener('click', () => addUnit('enemy'));
 
-    function renderUnitsList(side, hostEl) {
+    function renderUnitsList(side, hostEl, preserveOpen) {
         const cfg = deps.getConfig();
         const list = side === 'ally' ? cfg.allies : cfg.enemies;
+        const openSet = preserveOpen ? captureOpenCardKeys(hostEl) : new Set();
         const gAName = cfg.gauges?.gauge_a?.name || '状态槽A';
         const gBName = cfg.gauges?.gauge_b?.name || '状态槽B';
 
         hostEl.innerHTML = list.map((u, idx) => {
+            const cardKey = `${side}:${u.id}`;
+            const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
+            const clsName = (cfg.classTrees || []).find(c => c.id === u.classId)?.name || '';
             const poolLabelMap = { universal: '🌐', class: '🎓', monster: '👹' };
             const skillListForSide = side === 'ally'
                 ? (cfg.skills || []).filter(sk => sk.poolType !== 'monster')
@@ -497,60 +581,70 @@ export async function initSettingsUI(deps) {
             ].join('');
 
             return `
-                <div class="stcf-item-card" data-side="${side}" data-index="${idx}">
-                    <div class="stcf-item-head">
-                        <label class="stcf-inline-check">
-                            <input type="checkbox" data-field="enabled" ${u.enabled ? 'checked' : ''}>
-                            <strong>出战</strong>
-                        </label>
-                        <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(u.name)}" placeholder="角色名称">
-                        <span class="stcf-id-tag">${escapeHtml(u.id)}</span>
-                        ${list.length > 1 ? '<button type="button" class="stcf-del-btn" data-action="delete" title="删除角色">🗑️</button>' : ''}
-                    </div>
-                    <div class="stcf-field-row">
-                        <input type="text" class="text_pole" data-field="description" value="${escapeHtml(u.description || '')}" placeholder="一句话简约描述（会同步给剧情 AI 查阅）">
-                    </div>
-                    ${side === 'ally' ? `
-                        <div class="stcf-grid-3">
-                            <label class="stcf-mini-field"><span>当前等级 Lv</span><input type="number" min="1" class="text_pole" data-field="level" value="${u.level || 1}"></label>
-                            <label class="stcf-mini-field"><span>所属职业</span><select class="text_pole" data-field="classId">${classOpts}</select></label>
-                            <label class="stcf-mini-field"><span>未分配自由点</span><input type="number" min="0" class="text_pole" data-field="freePoints" value="${u.freePoints || 0}"></label>
-                        </div>
-                    ` : ''}
-                    <div class="stcf-grid-4">
-                        <label class="stcf-mini-field"><span>基础 HP</span><input type="number" min="1" class="text_pole" data-field="maxHp" value="${u.maxHp}"></label>
-                        <label class="stcf-mini-field"><span>基础 MP</span><input type="number" min="0" class="text_pole" data-field="maxMp" value="${u.maxMp}"></label>
-                        <label class="stcf-mini-field"><span>物理攻击 ATK</span><input type="number" min="0" class="text_pole" data-field="atk" value="${u.atk}"></label>
-                        <label class="stcf-mini-field"><span>精神法攻 SPI</span><input type="number" min="0" class="text_pole" data-field="spi" value="${u.spi ?? 15}"></label>
-                        <label class="stcf-mini-field"><span>物理防御 DEF</span><input type="number" min="0" class="text_pole" data-field="def" value="${u.def}"></label>
-                        <label class="stcf-mini-field"><span>法术抗性 MDEF</span><input type="number" min="0" class="text_pole" data-field="mdef" value="${u.mdef ?? 5}"></label>
-                        <label class="stcf-mini-field"><span>初始${escapeHtml(gAName)}</span><input type="number" min="0" max="100" class="text_pole" data-field="initialGaugeA" value="${u.initialGaugeA}"></label>
-                        <label class="stcf-mini-field"><span>初始${escapeHtml(gBName)}</span><input type="number" min="0" max="100" class="text_pole" data-field="initialGaugeB" value="${u.initialGaugeB}"></label>
-                    </div>
-                    <div class="stcf-grid-2">
-                        <label class="stcf-mini-field"><span>AI 出招策略</span>
-                            <select class="text_pole" data-field="aiStrategy">
-                                <option value="priority" ${u.aiStrategy !== 'weighted' && u.aiStrategy !== 'random' ? 'selected' : ''}>高优先级优先(推荐)</option>
-                                <option value="weighted" ${u.aiStrategy === 'weighted' ? 'selected' : ''}>按优先级权重随机</option>
-                                <option value="random" ${u.aiStrategy === 'random' ? 'selected' : ''}>完全随机</option>
-                            </select>
-                        </label>
-                        ${side === 'ally' ? `
-                            <label class="stcf-inline-check" style="margin-top:16px;">
-                                <input type="checkbox" data-field="autoControl" ${u.autoControl ? 'checked' : ''}>
-                                <span>🤖 自动托管 AI（我方自动出招）</span>
+                <details class="stcf-item-card stcf-fold" data-side="${side}" data-index="${idx}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
+                    <summary class="stcf-fold-summary">
+                        <span class="stcf-fold-title">
+                            ${u.enabled ? '✅' : '⬜'} <strong>${escapeHtml(u.name)}</strong>
+                            <small class="stcf-muted">${side === 'ally' ? `Lv.${u.level || 1}${clsName ? ` ${escapeHtml(clsName)}` : ''} · ` : ''}HP ${u.maxHp} · 攻${u.atk}/精${u.spi ?? 15}</small>
+                        </span>
+                        <span class="stcf-fold-right">
+                            <span class="stcf-id-tag">${escapeHtml(u.id)}</span>
+                            ${list.length > 1 ? '<button type="button" class="stcf-del-btn" data-action="delete" title="删除角色">🗑️</button>' : ''}
+                        </span>
+                    </summary>
+                    <div class="stcf-fold-body">
+                        <div class="stcf-item-head">
+                            <label class="stcf-inline-check">
+                                <input type="checkbox" data-field="enabled" ${u.enabled ? 'checked' : ''}>
+                                <strong>出战</strong>
                             </label>
-                        ` : '<div></div>'}
+                            <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(u.name)}" placeholder="角色名称">
+                        </div>
+                        <div class="stcf-field-row">
+                            <input type="text" class="text_pole" data-field="description" value="${escapeHtml(u.description || '')}" placeholder="一句话简约描述（会同步给剧情 AI 查阅）">
+                        </div>
+                        ${side === 'ally' ? `
+                            <div class="stcf-grid-3">
+                                <label class="stcf-mini-field"><span>当前等级 Lv</span><input type="number" min="1" class="text_pole" data-field="level" value="${u.level || 1}"></label>
+                                <label class="stcf-mini-field"><span>所属职业</span><select class="text_pole" data-field="classId">${classOpts}</select></label>
+                                <label class="stcf-mini-field"><span>未分配自由点</span><input type="number" min="0" class="text_pole" data-field="freePoints" value="${u.freePoints || 0}"></label>
+                            </div>
+                        ` : ''}
+                        <div class="stcf-grid-4">
+                            <label class="stcf-mini-field"><span>基础 HP</span><input type="number" min="1" class="text_pole" data-field="maxHp" value="${u.maxHp}"></label>
+                            <label class="stcf-mini-field"><span>基础 MP</span><input type="number" min="0" class="text_pole" data-field="maxMp" value="${u.maxMp}"></label>
+                            <label class="stcf-mini-field"><span>物理攻击 ATK</span><input type="number" min="0" class="text_pole" data-field="atk" value="${u.atk}"></label>
+                            <label class="stcf-mini-field"><span>精神法攻 SPI</span><input type="number" min="0" class="text_pole" data-field="spi" value="${u.spi ?? 15}"></label>
+                            <label class="stcf-mini-field"><span>物理防御 DEF</span><input type="number" min="0" class="text_pole" data-field="def" value="${u.def}"></label>
+                            <label class="stcf-mini-field"><span>法术抗性 MDEF</span><input type="number" min="0" class="text_pole" data-field="mdef" value="${u.mdef ?? 5}"></label>
+                            <label class="stcf-mini-field"><span>初始${escapeHtml(gAName)}</span><input type="number" min="0" max="100" class="text_pole" data-field="initialGaugeA" value="${u.initialGaugeA}"></label>
+                            <label class="stcf-mini-field"><span>初始${escapeHtml(gBName)}</span><input type="number" min="0" max="100" class="text_pole" data-field="initialGaugeB" value="${u.initialGaugeB}"></label>
+                        </div>
+                        <div class="stcf-grid-2">
+                            <label class="stcf-mini-field"><span>AI 出招策略</span>
+                                <select class="text_pole" data-field="aiStrategy">
+                                    <option value="priority" ${u.aiStrategy !== 'weighted' && u.aiStrategy !== 'random' ? 'selected' : ''}>高优先级优先(推荐)</option>
+                                    <option value="weighted" ${u.aiStrategy === 'weighted' ? 'selected' : ''}>按优先级权重随机</option>
+                                    <option value="random" ${u.aiStrategy === 'random' ? 'selected' : ''}>完全随机</option>
+                                </select>
+                            </label>
+                            ${side === 'ally' ? `
+                                <label class="stcf-inline-check" style="margin-top:16px;">
+                                    <input type="checkbox" data-field="autoControl" ${u.autoControl ? 'checked' : ''}>
+                                    <span>🤖 自动托管 AI</span>
+                                </label>
+                            ` : '<div></div>'}
+                        </div>
+                        <details class="stcf-sub-fold">
+                            <summary>⚔️ 手动/通用技能勾选（已选 ${(u.skillIds || []).length} 项）</summary>
+                            <div class="stcf-sub-body stcf-chips-wrap">${skillChecks || '<span class="stcf-muted">暂无技能</span>'}</div>
+                        </details>
+                        <details class="stcf-sub-fold">
+                            <summary>🛡️ 初始穿戴装备勾选（已选 ${(u.equipmentIds || []).length} 件）</summary>
+                            <div class="stcf-sub-body stcf-chips-wrap">${equipChecks || '<span class="stcf-muted">暂无装备</span>'}</div>
+                        </details>
                     </div>
-                    <div class="stcf-skill-assign">
-                        <div class="stcf-sub-label">可用技能：</div>
-                        <div class="stcf-chips-wrap">${skillChecks || '<span class="stcf-muted">暂无技能</span>'}</div>
-                    </div>
-                    <div class="stcf-skill-assign" style="margin-top:6px;">
-                        <div class="stcf-sub-label">初始穿戴装备：</div>
-                        <div class="stcf-chips-wrap">${equipChecks || '<span class="stcf-muted">暂无装备</span>'}</div>
-                    </div>
-                </div>
+                </details>
             `;
         }).join('');
     }
@@ -563,11 +657,9 @@ export async function initSettingsUI(deps) {
             const list = card.dataset.side === 'ally' ? cfg.allies : cfg.enemies;
             const unit = list[Number(card.dataset.index)];
             if (!unit) return;
-            const field = e.target.dataset.field;
-            unit[field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
+            unit[e.target.dataset.field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
             commitChange();
         });
-
         hostEl.addEventListener('change', (e) => {
             const card = e.target.closest('.stcf-item-card');
             if (!card) return;
@@ -578,13 +670,13 @@ export async function initSettingsUI(deps) {
 
             if (e.target.dataset.field === 'enabled') {
                 unit.enabled = e.target.checked;
-                commitChange();
+                commitChange(true);
             } else if (e.target.dataset.field === 'autoControl') {
                 unit.autoControl = e.target.checked;
                 commitChange();
             } else if (e.target.dataset.field === 'aiStrategy' || e.target.dataset.field === 'classId') {
                 unit[e.target.dataset.field] = e.target.value;
-                commitChange();
+                commitChange(e.target.dataset.field === 'classId');
             } else if (e.target.dataset.unitSkill) {
                 const set = new Set(unit.skillIds || []);
                 if (e.target.checked) set.add(e.target.dataset.unitSkill);
@@ -599,10 +691,10 @@ export async function initSettingsUI(deps) {
                 commitChange();
             }
         });
-
         hostEl.addEventListener('click', (e) => {
             const delBtn = e.target.closest('[data-action="delete"]');
             if (!delBtn) return;
+            e.preventDefault();
             const card = delBtn.closest('.stcf-item-card');
             const cfg = deps.getConfig();
             const list = card.dataset.side === 'ally' ? cfg.allies : cfg.enemies;
@@ -611,12 +703,11 @@ export async function initSettingsUI(deps) {
             commitChange(true);
         });
     }
-
     bindUnitsEvents(elAlliesEditor);
     bindUnitsEvents(elEnemiesEditor);
 
     // =========================================================================
-    // 三、技能库编辑器（v1.5：大组世界观 + 小组职业/通用/怪物池筛选）
+    // 三、技能库编辑器（默认折叠 + 多附加状态 + 卖血/吸血公式 + CD + 双前置状态）
     // =========================================================================
     const elSkillsEditor = container.querySelector('#stcf-skills-editor');
     const elFilterSkillWv = container.querySelector('#stcf-filter-skill-wv');
@@ -624,65 +715,43 @@ export async function initSettingsUI(deps) {
     let skillFilterWv = 'all';
     let skillFilterPool = 'all';
 
-    elFilterSkillWv.addEventListener('change', () => {
-        skillFilterWv = elFilterSkillWv.value || 'all';
-        renderSkillsList();
-    });
-    elFilterSkillPool.addEventListener('change', () => {
-        skillFilterPool = elFilterSkillPool.value || 'all';
-        renderSkillsList();
-    });
+    elFilterSkillWv.addEventListener('change', () => { skillFilterWv = elFilterSkillWv.value || 'all'; renderSkillsList(false); });
+    elFilterSkillPool.addEventListener('change', () => { skillFilterPool = elFilterSkillPool.value || 'all'; renderSkillsList(false); });
 
     container.querySelector('#stcf-btn-add-skill').addEventListener('click', () => {
         const cfg = deps.getConfig();
+        const id = makeUniqueId('skill', cfg.skills);
         cfg.skills.push({
-            id: makeUniqueId('skill', cfg.skills),
+            id,
             worldview: skillFilterWv !== 'all' ? skillFilterWv : '西幻',
             poolType: skillFilterPool !== 'all' ? skillFilterPool : 'universal',
             name: `新技能_${cfg.skills.length + 1}`,
             description: '自定义技能说明',
             mpCost: 10,
+            cooldown: 0,
             targetType: 'single_enemy',
             effectType: 'damage',
             formula: 'max(1, atk * 1.2 - target_def * 0.4)',
+            selfHpFormula: '0',
             selfGaugeAChange: 0,
             selfGaugeBChange: 0,
             targetGaugeAChange: 0,
             targetGaugeBChange: 0,
-            applyStatusId: '',
-            applyStatusChance: 100,
-            applyStatusTarget: 'target',
+            applyStatuses: [],
             requiredTargetStatusIds: [],
+            requiredSelfStatusIds: [],
             aiPriority: 10,
             aiHpBelowPercent: 100,
         });
-        commitChange(true);
+        commitChange(true, `sk:${id}`);
     });
 
-    function buildStatusSelectOptions(cfg, selectedId, emptyLabel = '无') {
-        return [
-            `<option value="">${emptyLabel}</option>`,
-            ...(cfg.statuses || []).map(st =>
-                `<option value="${escapeHtml(st.id)}" ${selectedId === st.id ? 'selected' : ''}>${escapeHtml(st.icon)} ${escapeHtml(st.name)} (${escapeHtml(st.id)})</option>`
-            ),
-        ].join('');
-    }
-
-    function buildSkillSelectOptions(cfg, selectedId, emptyLabel = '无') {
-        return [
-            `<option value="">${emptyLabel}</option>`,
-            ...(cfg.skills || []).map(sk =>
-                `<option value="${escapeHtml(sk.id)}" ${selectedId === sk.id ? 'selected' : ''}>${escapeHtml(sk.name)} (${escapeHtml(sk.id)})</option>`
-            ),
-        ].join('');
-    }
-
-    function renderSkillsList() {
+    function renderSkillsList(preserveOpen) {
         const cfg = deps.getConfig();
+        const openSet = preserveOpen ? captureOpenCardKeys(elSkillsEditor) : new Set();
         const gAName = cfg.gauges?.gauge_a?.name || '状态槽A';
         const gBName = cfg.gauges?.gauge_b?.name || '状态槽B';
 
-        // 刷新世界观筛选下拉
         const allWvs = collectAllWorldviews(cfg);
         elFilterSkillWv.innerHTML = [
             '<option value="all">全部世界观</option>',
@@ -697,177 +766,306 @@ export async function initSettingsUI(deps) {
                 return true;
             });
 
-        elSkillsEditor.innerHTML = entries.map(({ sk, idx }) => `
-            <div class="stcf-item-card" data-index="${idx}">
-                <div class="stcf-item-head">
-                    <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(sk.name)}" placeholder="技能名称">
-                    <span class="stcf-id-tag">${escapeHtml(sk.id)}</span>
-                    <button type="button" class="stcf-del-btn" data-action="delete" title="删除技能">🗑️</button>
+        elSkillsEditor.innerHTML = entries.map(({ sk, idx }) => {
+            const cardKey = `sk:${sk.id}`;
+            const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
+            const applyList = Array.isArray(sk.applyStatuses) ? sk.applyStatuses : [];
+            const reqTgtCount = (sk.requiredTargetStatusIds || []).length;
+            const reqSelfCount = (sk.requiredSelfStatusIds || []).length;
+            const cdTag = (sk.cooldown || 0) > 0 ? ` · CD${sk.cooldown}` : '';
+
+            const applyRowsHtml = applyList.map((ap, aIdx) => `
+                <div class="stcf-apply-row" data-apply-index="${aIdx}">
+                    <select class="text_pole" data-apply-field="statusId">${buildStatusSelectOptions(cfg, ap.statusId, '选择状态...')}</select>
+                    <input type="number" min="0" max="100" class="text_pole stcf-pct-input" data-apply-field="chance" value="${ap.chance ?? 100}" title="触发概率 %">
+                    <select class="text_pole stcf-tgt-select" data-apply-field="target">
+                        <option value="target" ${ap.target !== 'self' ? 'selected' : ''}>给目标</option>
+                        <option value="self" ${ap.target === 'self' ? 'selected' : ''}>给自己</option>
+                    </select>
+                    <button type="button" class="stcf-del-btn" data-apply-action="remove" title="删除此附加状态">✖</button>
                 </div>
-                <div class="stcf-grid-2">
-                    <label class="stcf-mini-field"><span>世界观大组</span><input type="text" class="text_pole" data-field="worldview" value="${escapeHtml(sk.worldview || '通用')}" placeholder="如：西幻"></label>
-                    <label class="stcf-mini-field"><span>所属技能池</span>
-                        <select class="text_pole" data-field="poolType">
-                            <option value="class" ${sk.poolType === 'class' ? 'selected' : ''}>🎓 职业技能池 (class)</option>
-                            <option value="universal" ${sk.poolType === 'universal' ? 'selected' : ''}>🌐 通用技能池 (universal)</option>
-                            <option value="monster" ${sk.poolType === 'monster' ? 'selected' : ''}>👹 怪物技能池 (monster)</option>
-                        </select>
-                    </label>
-                </div>
-                <div class="stcf-field-row">
-                    <input type="text" class="text_pole" data-field="description" value="${escapeHtml(sk.description)}" placeholder="技能简述（10~25字）">
-                </div>
-                <div class="stcf-grid-3">
-                    <label class="stcf-mini-field"><span>消耗 MP</span><input type="number" min="0" class="text_pole" data-field="mpCost" value="${sk.mpCost}"></label>
-                    <label class="stcf-mini-field"><span>目标范围</span>
-                        <select class="text_pole" data-field="targetType">
-                            <option value="single_enemy" ${sk.targetType === 'single_enemy' ? 'selected' : ''}>单体敌方</option>
-                            <option value="all_enemies" ${sk.targetType === 'all_enemies' ? 'selected' : ''}>全体敌方</option>
-                            <option value="self" ${sk.targetType === 'self' ? 'selected' : ''}>仅自身</option>
-                            <option value="single_ally" ${sk.targetType === 'single_ally' ? 'selected' : ''}>单体友方</option>
-                            <option value="all_allies" ${sk.targetType === 'all_allies' ? 'selected' : ''}>全体友方</option>
-                        </select>
-                    </label>
-                    <label class="stcf-mini-field"><span>效果类型</span>
-                        <select class="text_pole" data-field="effectType">
-                            <option value="damage" ${sk.effectType === 'damage' ? 'selected' : ''}>造成伤害</option>
-                            <option value="heal" ${sk.effectType === 'heal' ? 'selected' : ''}>回复 HP</option>
-                            <option value="mp_restore" ${sk.effectType === 'mp_restore' ? 'selected' : ''}>回复 MP</option>
-                            <option value="utility" ${sk.effectType === 'utility' ? 'selected' : ''}>纯状态/特殊槽</option>
-                        </select>
-                    </label>
-                </div>
-                <div class="stcf-field-row">
-                    <label>数值公式：</label>
-                    <input type="text" class="text_pole" data-field="formula" value="${escapeHtml(sk.formula)}">
-                </div>
-                <div class="stcf-grid-4">
-                    <label class="stcf-mini-field"><span>自身${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="selfGaugeAChange" value="${sk.selfGaugeAChange}"></label>
-                    <label class="stcf-mini-field"><span>自身${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="selfGaugeBChange" value="${sk.selfGaugeBChange}"></label>
-                    <label class="stcf-mini-field"><span>目标${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="targetGaugeAChange" value="${sk.targetGaugeAChange}"></label>
-                    <label class="stcf-mini-field"><span>目标${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="targetGaugeBChange" value="${sk.targetGaugeBChange}"></label>
-                </div>
-                <div class="stcf-grid-3">
-                    <label class="stcf-mini-field"><span>附加状态</span>
-                        <select class="text_pole" data-field="applyStatusId">${buildStatusSelectOptions(cfg, sk.applyStatusId, '无附加状态')}</select>
-                    </label>
-                    <label class="stcf-mini-field"><span>附加概率(%)</span><input type="number" min="0" max="100" class="text_pole" data-field="applyStatusChance" value="${sk.applyStatusChance}"></label>
-                    <label class="stcf-mini-field"><span>状态施加给</span>
-                        <select class="text_pole" data-field="applyStatusTarget">
-                            <option value="target" ${sk.applyStatusTarget !== 'self' ? 'selected' : ''}>技能目标</option>
-                            <option value="self" ${sk.applyStatusTarget === 'self' ? 'selected' : ''}>释放者自己</option>
-                        </select>
-                    </label>
-                </div>
-                <div class="stcf-grid-2">
-                    <label class="stcf-mini-field"><span>AI 释放优先级（越大越优先）</span><input type="number" min="1" class="text_pole" data-field="aiPriority" value="${sk.aiPriority ?? 10}"></label>
-                    <label class="stcf-mini-field"><span>AI 仅在 HP ≤ (%) 时释放（100=不限）</span><input type="number" min="1" max="100" class="text_pole" data-field="aiHpBelowPercent" value="${sk.aiHpBelowPercent ?? 100}" title="治疗技判断友方血量%，攻击/自身技判断释放者自身血量%"></label>
-                </div>
-                <div class="stcf-skill-assign" style="margin-top:6px;">
-                    <div class="stcf-sub-label">🔒 释放前置状态（目标持有以下<strong>任意 1 个</strong>才可释放，全不勾则无限制）：</div>
-                    <div class="stcf-chips-wrap">
-                        ${(cfg.statuses || []).map(st => `
-                            <label class="stcf-chip-check">
-                                <input type="checkbox" data-skill-req-status="${escapeHtml(st.id)}" ${(sk.requiredTargetStatusIds || []).includes(st.id) ? 'checked' : ''}>
-                                <span>${escapeHtml(st.icon)} ${escapeHtml(st.name)}</span>
+            `).join('');
+
+            return `
+                <details class="stcf-item-card stcf-fold" data-index="${idx}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
+                    <summary class="stcf-fold-summary">
+                        <span class="stcf-fold-title">
+                            ${POOL_LABELS[sk.poolType] || '🌐'} [${escapeHtml(sk.worldview || '通用')}] <strong>${escapeHtml(sk.name)}</strong>
+                            <small class="stcf-muted">${sk.mpCost}MP · ${TARGET_LABELS[sk.targetType] || ''}${cdTag}</small>
+                        </span>
+                        <span class="stcf-fold-right">
+                            <span class="stcf-id-tag">${escapeHtml(sk.id)}</span>
+                            <button type="button" class="stcf-del-btn" data-action="delete" title="删除技能">🗑️</button>
+                        </span>
+                    </summary>
+                    <div class="stcf-fold-body">
+                        <div class="stcf-field-row">
+                            <input type="text" class="text_pole" data-field="name" value="${escapeHtml(sk.name)}" placeholder="技能名称">
+                        </div>
+                        <div class="stcf-grid-2">
+                            <label class="stcf-mini-field"><span>世界观大组</span><input type="text" class="text_pole" data-field="worldview" value="${escapeHtml(sk.worldview || '通用')}"></label>
+                            <label class="stcf-mini-field"><span>所属技能池</span>
+                                <select class="text_pole" data-field="poolType">
+                                    <option value="class" ${sk.poolType === 'class' ? 'selected' : ''}>🎓 职业技能池 (class)</option>
+                                    <option value="universal" ${sk.poolType === 'universal' ? 'selected' : ''}>🌐 通用技能池 (universal)</option>
+                                    <option value="monster" ${sk.poolType === 'monster' ? 'selected' : ''}>👹 怪物技能池 (monster)</option>
+                                </select>
                             </label>
-                        `).join('') || '<span class="stcf-muted">暂无状态</span>'}
+                        </div>
+                        <div class="stcf-field-row">
+                            <input type="text" class="text_pole" data-field="description" value="${escapeHtml(sk.description)}" placeholder="技能简述（10~25字）">
+                        </div>
+                        <div class="stcf-grid-4">
+                            <label class="stcf-mini-field"><span>消耗 MP</span><input type="number" min="0" class="text_pole" data-field="mpCost" value="${sk.mpCost}"></label>
+                            <label class="stcf-mini-field"><span>冷却回合 CD</span><input type="number" min="0" class="text_pole" data-field="cooldown" value="${sk.cooldown ?? 0}" title="0=无冷却"></label>
+                            <label class="stcf-mini-field"><span>目标范围</span>
+                                <select class="text_pole" data-field="targetType">
+                                    <option value="single_enemy" ${sk.targetType === 'single_enemy' ? 'selected' : ''}>单体敌方</option>
+                                    <option value="all_enemies" ${sk.targetType === 'all_enemies' ? 'selected' : ''}>全体敌方</option>
+                                    <option value="self" ${sk.targetType === 'self' ? 'selected' : ''}>仅自身</option>
+                                    <option value="single_ally" ${sk.targetType === 'single_ally' ? 'selected' : ''}>单体友方</option>
+                                    <option value="all_allies" ${sk.targetType === 'all_allies' ? 'selected' : ''}>全体友方</option>
+                                </select>
+                            </label>
+                            <label class="stcf-mini-field"><span>效果类型</span>
+                                <select class="text_pole" data-field="effectType">
+                                    <option value="damage" ${sk.effectType === 'damage' ? 'selected' : ''}>造成伤害</option>
+                                    <option value="heal" ${sk.effectType === 'heal' ? 'selected' : ''}>回复 HP</option>
+                                    <option value="mp_restore" ${sk.effectType === 'mp_restore' ? 'selected' : ''}>回复 MP</option>
+                                    <option value="utility" ${sk.effectType === 'utility' ? 'selected' : ''}>纯状态/特殊槽</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="stcf-grid-2">
+                            <label class="stcf-mini-field"><span>主效果数值公式</span><input type="text" class="text_pole" data-field="formula" value="${escapeHtml(sk.formula)}"></label>
+                            <label class="stcf-mini-field"><span>自身 HP 变化公式(负卖血/正吸血)</span><input type="text" class="text_pole" data-field="selfHpFormula" value="${escapeHtml(sk.selfHpFormula || '0')}" placeholder="0 / -20 / spi*0.5"></label>
+                        </div>
+                        <div class="stcf-grid-4">
+                            <label class="stcf-mini-field"><span>自身${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="selfGaugeAChange" value="${sk.selfGaugeAChange}"></label>
+                            <label class="stcf-mini-field"><span>自身${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="selfGaugeBChange" value="${sk.selfGaugeBChange}"></label>
+                            <label class="stcf-mini-field"><span>目标${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="targetGaugeAChange" value="${sk.targetGaugeAChange}"></label>
+                            <label class="stcf-mini-field"><span>目标${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="targetGaugeBChange" value="${sk.targetGaugeBChange}"></label>
+                        </div>
+                        <div class="stcf-grid-2">
+                            <label class="stcf-mini-field"><span>AI 优先级（越大越优先）</span><input type="number" min="1" class="text_pole" data-field="aiPriority" value="${sk.aiPriority ?? 10}"></label>
+                            <label class="stcf-mini-field"><span>AI 仅在 HP ≤ (%) 释放</span><input type="number" min="1" max="100" class="text_pole" data-field="aiHpBelowPercent" value="${sk.aiHpBelowPercent ?? 100}"></label>
+                        </div>
+
+                        <!-- 折叠子区：附加多个状态 -->
+                        <details class="stcf-sub-fold">
+                            <summary>✨ 附加状态列表（支持同时附加多个 · 已配 ${applyList.length} 项）</summary>
+                            <div class="stcf-sub-body">
+                                <button type="button" class="menu_button stcf-sm-btn" data-apply-action="add" style="margin-bottom:6px;">➕ 添加附加状态</button>
+                                ${applyRowsHtml || '<div class="stcf-muted">暂无附加状态</div>'}
+                            </div>
+                        </details>
+
+                        <!-- 折叠子区：目标与自身前置状态 -->
+                        <details class="stcf-sub-fold">
+                            <summary>🔒 释放前置状态条件（目标已选 ${reqTgtCount} 项 ｜ 自身已选 ${reqSelfCount} 项）</summary>
+                            <div class="stcf-sub-body">
+                                <div class="stcf-sub-label">目标持有以下<strong>任意 1 个</strong>状态才可释放（全不勾不限）：</div>
+                                <div class="stcf-chips-wrap" style="margin-bottom:8px;">${renderStatusCheckChips(cfg, sk.requiredTargetStatusIds, 'data-skill-req-target')}</div>
+                                <div class="stcf-sub-label">自身持有以下<strong>任意 1 个</strong>状态才可释放（如狂暴/魔力涌动，全不勾不限）：</div>
+                                <div class="stcf-chips-wrap">${renderStatusCheckChips(cfg, sk.requiredSelfStatusIds, 'data-skill-req-self')}</div>
+                            </div>
+                        </details>
                     </div>
-                </div>
-            </div>
-        `).join('');
+                </details>
+            `;
+        }).join('');
     }
 
-    elSkillsEditor.addEventListener('change', (e) => {
-        if (!e.target.dataset.skillReqStatus) return;
+    elSkillsEditor.addEventListener('input', (e) => {
         const card = e.target.closest('.stcf-item-card');
         if (!card) return;
         const skill = deps.getConfig().skills[Number(card.dataset.index)];
         if (!skill) return;
-        const set = new Set(skill.requiredTargetStatusIds || []);
-        if (e.target.checked) set.add(e.target.dataset.skillReqStatus);
-        else set.delete(e.target.dataset.skillReqStatus);
-        skill.requiredTargetStatusIds = [...set];
+        if (e.target.dataset.applyField === 'chance') {
+            const row = e.target.closest('.stcf-apply-row');
+            const ap = skill.applyStatuses[Number(row.dataset.applyIndex)];
+            if (ap) { ap.chance = Math.max(0, Math.min(100, Number(e.target.value) || 0)); commitChange(); }
+            return;
+        }
+        if (!e.target.dataset.field || e.target.type === 'checkbox') return;
+        skill[e.target.dataset.field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
         commitChange();
     });
+    elSkillsEditor.addEventListener('change', (e) => {
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const skill = deps.getConfig().skills[Number(card.dataset.index)];
+        if (!skill) return;
 
-    bindSimpleListEvents(elSkillsEditor, () => deps.getConfig().skills, ['name']);
+        if (e.target.dataset.applyField) {
+            const row = e.target.closest('.stcf-apply-row');
+            const ap = skill.applyStatuses[Number(row.dataset.applyIndex)];
+            if (ap) {
+                ap[e.target.dataset.applyField] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
+                commitChange();
+            }
+            return;
+        }
+        if (e.target.dataset.skillReqTarget) {
+            const set = new Set(skill.requiredTargetStatusIds || []);
+            if (e.target.checked) set.add(e.target.dataset.skillReqTarget);
+            else set.delete(e.target.dataset.skillReqTarget);
+            skill.requiredTargetStatusIds = [...set];
+            commitChange();
+            return;
+        }
+        if (e.target.dataset.skillReqSelf) {
+            const set = new Set(skill.requiredSelfStatusIds || []);
+            if (e.target.checked) set.add(e.target.dataset.skillReqSelf);
+            else set.delete(e.target.dataset.skillReqSelf);
+            skill.requiredSelfStatusIds = [...set];
+            commitChange();
+            return;
+        }
+        if (!e.target.dataset.field) return;
+        const field = e.target.dataset.field;
+        skill[field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
+        commitChange(['name', 'worldview', 'poolType'].includes(field));
+    });
+    elSkillsEditor.addEventListener('click', (e) => {
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const idx = Number(card.dataset.index);
+        const skill = deps.getConfig().skills[idx];
+        if (!skill) return;
+        if (e.target.closest('[data-action="delete"]')) {
+            e.preventDefault();
+            deps.getConfig().skills.splice(idx, 1);
+            commitChange(true);
+        } else if (e.target.closest('[data-apply-action="add"]')) {
+            if (!Array.isArray(skill.applyStatuses)) skill.applyStatuses = [];
+            skill.applyStatuses.push({
+                statusId: deps.getConfig().statuses[0]?.id || '',
+                chance: 100,
+                target: 'target',
+            });
+            commitChange(true);
+        } else if (e.target.closest('[data-apply-action="remove"]')) {
+            const row = e.target.closest('.stcf-apply-row');
+            skill.applyStatuses.splice(Number(row.dataset.applyIndex), 1);
+            commitChange(true);
+        }
+    });
 
     // =========================================================================
-    // 四、装备库编辑器（v1.1 新增：含附带技能与常驻 Buff）
+    // 四、装备库编辑器（默认折叠 + 多常驻 Buff + 多解锁技能）
     // =========================================================================
     const elEquipsEditor = container.querySelector('#stcf-equipments-editor');
     container.querySelector('#stcf-btn-add-equip').addEventListener('click', () => {
         const cfg = deps.getConfig();
+        const id = makeUniqueId('equip', cfg.equipments);
         cfg.equipments.push({
-            id: makeUniqueId('equip', cfg.equipments),
+            id,
             name: `新装备_${cfg.equipments.length + 1}`,
             slot: 'head',
             description: '自定义装备说明',
-            bonusHp: 0,
-            bonusMp: 0,
-            bonusAtk: 0,
-            bonusSpi: 0,
-            bonusDef: 5,
-            bonusMdef: 0,
-            grantSkillId: '',
-            passiveStatusId: '',
+            bonusHp: 0, bonusMp: 0, bonusAtk: 0, bonusSpi: 0, bonusDef: 5, bonusMdef: 0,
+            grantSkillIds: [],
+            passiveStatusIds: [],
         });
-        commitChange(true);
+        commitChange(true, `eq:${id}`);
     });
 
-    function renderEquipmentsList() {
+    function renderEquipmentsList(preserveOpen) {
         const cfg = deps.getConfig();
-        elEquipsEditor.innerHTML = (cfg.equipments || []).map((eq, idx) => `
-            <div class="stcf-item-card" data-index="${idx}">
-                <div class="stcf-item-head">
-                    <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(eq.name)}" placeholder="装备名称（如：铁帽子）">
-                    <span class="stcf-id-tag">${escapeHtml(eq.id)}</span>
-                    <button type="button" class="stcf-del-btn" data-action="delete" title="删除装备">🗑️</button>
-                </div>
-                <div class="stcf-grid-2">
-                    <label class="stcf-mini-field"><span>装备部位</span>
-                        <select class="text_pole" data-field="slot">
-                            <option value="weapon" ${eq.slot === 'weapon' ? 'selected' : ''}>武器 (weapon)</option>
-                            <option value="head" ${eq.slot === 'head' ? 'selected' : ''}>头部/帽子 (head)</option>
-                            <option value="body" ${eq.slot === 'body' ? 'selected' : ''}>防具/衣服 (body)</option>
-                            <option value="accessory" ${eq.slot === 'accessory' ? 'selected' : ''}>饰品 (accessory·可多戴)</option>
-                        </select>
-                    </label>
-                    <label class="stcf-mini-field"><span>说明</span>
-                        <input type="text" class="text_pole" data-field="description" value="${escapeHtml(eq.description)}" placeholder="装备描述">
-                    </label>
-                </div>
-                <div class="stcf-grid-3">
-                    <label class="stcf-mini-field"><span>生命加成 HP</span><input type="number" class="text_pole" data-field="bonusHp" value="${eq.bonusHp}"></label>
-                    <label class="stcf-mini-field"><span>体力加成 MP</span><input type="number" class="text_pole" data-field="bonusMp" value="${eq.bonusMp}"></label>
-                    <label class="stcf-mini-field"><span>物攻加成 ATK</span><input type="number" class="text_pole" data-field="bonusAtk" value="${eq.bonusAtk}"></label>
-                    <label class="stcf-mini-field"><span>精神加成 SPI</span><input type="number" class="text_pole" data-field="bonusSpi" value="${eq.bonusSpi ?? 0}"></label>
-                    <label class="stcf-mini-field"><span>物防加成 DEF</span><input type="number" class="text_pole" data-field="bonusDef" value="${eq.bonusDef}"></label>
-                    <label class="stcf-mini-field"><span>法抗加成 MDEF</span><input type="number" class="text_pole" data-field="bonusMdef" value="${eq.bonusMdef ?? 0}"></label>
-                </div>
-                <div class="stcf-grid-2">
-                    <label class="stcf-mini-field"><span>穿戴附带常驻 Buff</span>
-                        <select class="text_pole" data-field="passiveStatusId">${buildStatusSelectOptions(cfg, eq.passiveStatusId, '无常驻 Buff')}</select>
-                    </label>
-                    <label class="stcf-mini-field"><span>穿戴解锁专属技能</span>
-                        <select class="text_pole" data-field="grantSkillId">${buildSkillSelectOptions(cfg, eq.grantSkillId, '无附带技能')}</select>
-                    </label>
-                </div>
-            </div>
-        `).join('');
+        const openSet = preserveOpen ? captureOpenCardKeys(elEquipsEditor) : new Set();
+
+        elEquipsEditor.innerHTML = (cfg.equipments || []).map((eq, idx) => {
+            const cardKey = `eq:${eq.id}`;
+            const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
+            const pCount = (eq.passiveStatusIds || []).length;
+            const gCount = (eq.grantSkillIds || []).length;
+            const skillChecks = (cfg.skills || []).filter(s => s.poolType !== 'monster').map(sk => `
+                <label class="stcf-chip-check">
+                    <input type="checkbox" data-eq-grant-skill="${escapeHtml(sk.id)}" ${(eq.grantSkillIds || []).includes(sk.id) ? 'checked' : ''}>
+                    <span>${escapeHtml(sk.name)}</span>
+                </label>
+            `).join('');
+
+            return `
+                <details class="stcf-item-card stcf-fold" data-index="${idx}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
+                    <summary class="stcf-fold-summary">
+                        <span class="stcf-fold-title">
+                            🛡️ [${SLOT_LABELS[eq.slot] || eq.slot}] <strong>${escapeHtml(eq.name)}</strong>
+                            <small class="stcf-muted">${pCount ? `常驻${pCount}状态` : ''}${gCount ? ` 附${gCount}技` : ''}</small>
+                        </span>
+                        <span class="stcf-fold-right">
+                            <span class="stcf-id-tag">${escapeHtml(eq.id)}</span>
+                            <button type="button" class="stcf-del-btn" data-action="delete" title="删除装备">🗑️</button>
+                        </span>
+                    </summary>
+                    <div class="stcf-fold-body">
+                        <div class="stcf-field-row">
+                            <input type="text" class="text_pole" data-field="name" value="${escapeHtml(eq.name)}" placeholder="装备名称">
+                        </div>
+                        <div class="stcf-grid-2">
+                            <label class="stcf-mini-field"><span>装备部位</span>
+                                <select class="text_pole" data-field="slot">
+                                    <option value="weapon" ${eq.slot === 'weapon' ? 'selected' : ''}>武器 (weapon)</option>
+                                    <option value="head" ${eq.slot === 'head' ? 'selected' : ''}>头部/帽子 (head)</option>
+                                    <option value="body" ${eq.slot === 'body' ? 'selected' : ''}>防具/衣服 (body)</option>
+                                    <option value="accessory" ${eq.slot === 'accessory' ? 'selected' : ''}>饰品 (accessory·可多戴)</option>
+                                </select>
+                            </label>
+                            <label class="stcf-mini-field"><span>简述</span><input type="text" class="text_pole" data-field="description" value="${escapeHtml(eq.description)}"></label>
+                        </div>
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>+HP</span><input type="number" class="text_pole" data-field="bonusHp" value="${eq.bonusHp}"></label>
+                            <label class="stcf-mini-field"><span>+MP</span><input type="number" class="text_pole" data-field="bonusMp" value="${eq.bonusMp}"></label>
+                            <label class="stcf-mini-field"><span>+物攻</span><input type="number" class="text_pole" data-field="bonusAtk" value="${eq.bonusAtk}"></label>
+                            <label class="stcf-mini-field"><span>+精神</span><input type="number" class="text_pole" data-field="bonusSpi" value="${eq.bonusSpi ?? 0}"></label>
+                            <label class="stcf-mini-field"><span>+物防</span><input type="number" class="text_pole" data-field="bonusDef" value="${eq.bonusDef}"></label>
+                            <label class="stcf-mini-field"><span>+法抗</span><input type="number" class="text_pole" data-field="bonusMdef" value="${eq.bonusMdef ?? 0}"></label>
+                        </div>
+                        <details class="stcf-sub-fold">
+                            <summary>✨ 穿戴附带常驻 Buff（支持多选 · 已选 ${pCount} 项）</summary>
+                            <div class="stcf-sub-body stcf-chips-wrap">${renderStatusCheckChips(cfg, eq.passiveStatusIds, 'data-eq-passive-status')}</div>
+                        </details>
+                        <details class="stcf-sub-fold">
+                            <summary>⚔️ 穿戴解锁专属技能（支持多选 · 已选 ${gCount} 项）</summary>
+                            <div class="stcf-sub-body stcf-chips-wrap">${skillChecks || '<span class="stcf-muted">暂无技能</span>'}</div>
+                        </details>
+                    </div>
+                </details>
+            `;
+        }).join('');
     }
 
-    bindSimpleListEvents(elEquipsEditor, () => deps.getConfig().equipments, ['name']);
+    elEquipsEditor.addEventListener('change', (e) => {
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const eq = deps.getConfig().equipments[Number(card.dataset.index)];
+        if (!eq) return;
+        if (e.target.dataset.eqPassiveStatus) {
+            const set = new Set(eq.passiveStatusIds || []);
+            if (e.target.checked) set.add(e.target.dataset.eqPassiveStatus);
+            else set.delete(e.target.dataset.eqPassiveStatus);
+            eq.passiveStatusIds = [...set];
+            commitChange();
+        } else if (e.target.dataset.eqGrantSkill) {
+            const set = new Set(eq.grantSkillIds || []);
+            if (e.target.checked) set.add(e.target.dataset.eqGrantSkill);
+            else set.delete(e.target.dataset.eqGrantSkill);
+            eq.grantSkillIds = [...set];
+            commitChange();
+        }
+    });
+    bindSimpleListEvents(elEquipsEditor, () => deps.getConfig().equipments, ['name', 'slot']);
 
     // =========================================================================
-    // 五、道具库编辑器（v1.1 新增）
+    // 五、道具库编辑器（默认折叠 + 附加多个状态）
     // =========================================================================
     const elItemsEditor = container.querySelector('#stcf-items-editor');
     container.querySelector('#stcf-btn-add-item').addEventListener('click', () => {
         const cfg = deps.getConfig();
+        const id = makeUniqueId('item', cfg.items);
         cfg.items.push({
-            id: makeUniqueId('item', cfg.items),
+            id,
             name: `新道具_${cfg.items.length + 1}`,
             icon: '🧪',
             description: '自定义消耗品说明',
@@ -877,147 +1075,234 @@ export async function initSettingsUI(deps) {
             formula: '40',
             targetGaugeAChange: 0,
             targetGaugeBChange: 0,
-            applyStatusId: '',
-            applyStatusChance: 100,
+            applyStatuses: [],
             consumesTurn: true,
         });
-        commitChange(true);
+        commitChange(true, `it:${id}`);
     });
 
-    function renderItemsList() {
+    function renderItemsList(preserveOpen) {
         const cfg = deps.getConfig();
+        const openSet = preserveOpen ? captureOpenCardKeys(elItemsEditor) : new Set();
         const gAName = cfg.gauges?.gauge_a?.name || '状态槽A';
         const gBName = cfg.gauges?.gauge_b?.name || '状态槽B';
 
-        elItemsEditor.innerHTML = (cfg.items || []).map((it, idx) => `
-            <div class="stcf-item-card" data-index="${idx}">
-                <div class="stcf-item-head">
-                    <input type="text" class="text_pole stcf-icon-input" data-field="icon" value="${escapeHtml(it.icon)}" title="图标">
-                    <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(it.name)}" placeholder="道具名称">
-                    <span class="stcf-id-tag">${escapeHtml(it.id)}</span>
-                    <button type="button" class="stcf-del-btn" data-action="delete" title="删除道具">🗑️</button>
+        elItemsEditor.innerHTML = (cfg.items || []).map((it, idx) => {
+            const cardKey = `it:${it.id}`;
+            const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
+            const applyList = Array.isArray(it.applyStatuses) ? it.applyStatuses : [];
+            const applyRows = applyList.map((ap, aIdx) => `
+                <div class="stcf-apply-row" data-apply-index="${aIdx}">
+                    <select class="text_pole" data-apply-field="statusId">${buildStatusSelectOptions(cfg, ap.statusId, '选择状态...')}</select>
+                    <input type="number" min="0" max="100" class="text_pole stcf-pct-input" data-apply-field="chance" value="${ap.chance ?? 100}" title="触发概率 %">
+                    <button type="button" class="stcf-del-btn" data-apply-action="remove">✖</button>
                 </div>
-                <div class="stcf-field-row">
-                    <input type="text" class="text_pole" data-field="description" value="${escapeHtml(it.description)}" placeholder="道具效果说明">
-                </div>
-                <div class="stcf-grid-3">
-                    <label class="stcf-mini-field"><span>库存数量</span><input type="number" min="0" class="text_pole" data-field="quantity" value="${it.quantity}"></label>
-                    <label class="stcf-mini-field"><span>目标范围</span>
-                        <select class="text_pole" data-field="targetType">
-                            <option value="single_ally" ${it.targetType === 'single_ally' ? 'selected' : ''}>单体友方</option>
-                            <option value="all_allies" ${it.targetType === 'all_allies' ? 'selected' : ''}>全体友方</option>
-                            <option value="self" ${it.targetType === 'self' ? 'selected' : ''}>仅自身</option>
-                            <option value="single_enemy" ${it.targetType === 'single_enemy' ? 'selected' : ''}>单体敌方</option>
-                            <option value="all_enemies" ${it.targetType === 'all_enemies' ? 'selected' : ''}>全体敌方</option>
-                        </select>
-                    </label>
-                    <label class="stcf-mini-field"><span>效果类型</span>
-                        <select class="text_pole" data-field="effectType">
-                            <option value="heal" ${it.effectType === 'heal' ? 'selected' : ''}>回复 HP</option>
-                            <option value="mp_restore" ${it.effectType === 'mp_restore' ? 'selected' : ''}>回复 MP</option>
-                            <option value="damage" ${it.effectType === 'damage' ? 'selected' : ''}>造成伤害</option>
-                            <option value="cleanse" ${it.effectType === 'cleanse' ? 'selected' : ''}>净化异常状态</option>
-                            <option value="utility" ${it.effectType === 'utility' ? 'selected' : ''}>纯状态/特殊槽</option>
-                        </select>
-                    </label>
-                </div>
-                <div class="stcf-grid-3">
-                    <label class="stcf-mini-field"><span>数值公式</span><input type="text" class="text_pole" data-field="formula" value="${escapeHtml(it.formula)}"></label>
-                    <label class="stcf-mini-field"><span>目标${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="targetGaugeAChange" value="${it.targetGaugeAChange}"></label>
-                    <label class="stcf-mini-field"><span>目标${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="targetGaugeBChange" value="${it.targetGaugeBChange}"></label>
-                </div>
-                <div class="stcf-grid-2">
-                    <label class="stcf-mini-field"><span>附加状态</span>
-                        <select class="text_pole" data-field="applyStatusId">${buildStatusSelectOptions(cfg, it.applyStatusId, '无附加状态')}</select>
-                    </label>
-                    <label class="stcf-inline-check" style="margin-top:16px;">
-                        <input type="checkbox" data-field="consumesTurn" ${it.consumesTurn !== false ? 'checked' : ''}>
-                        <span>使用消耗行动回合</span>
-                    </label>
-                </div>
-            </div>
-        `).join('');
+            `).join('');
+
+            return `
+                <details class="stcf-item-card stcf-fold" data-index="${idx}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
+                    <summary class="stcf-fold-summary">
+                        <span class="stcf-fold-title">
+                            ${escapeHtml(it.icon || '🎒')} <strong>${escapeHtml(it.name)}</strong>
+                            <small class="stcf-muted">×${it.quantity} · ${TARGET_LABELS[it.targetType] || ''}${it.consumesTurn === false ? ' · 不占回合' : ''}</small>
+                        </span>
+                        <span class="stcf-fold-right">
+                            <span class="stcf-id-tag">${escapeHtml(it.id)}</span>
+                            <button type="button" class="stcf-del-btn" data-action="delete" title="删除道具">🗑️</button>
+                        </span>
+                    </summary>
+                    <div class="stcf-fold-body">
+                        <div class="stcf-item-head">
+                            <input type="text" class="text_pole stcf-icon-input" data-field="icon" value="${escapeHtml(it.icon)}">
+                            <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(it.name)}" placeholder="道具名称">
+                        </div>
+                        <div class="stcf-field-row">
+                            <input type="text" class="text_pole" data-field="description" value="${escapeHtml(it.description)}" placeholder="道具效果说明">
+                        </div>
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>库存数量</span><input type="number" min="0" class="text_pole" data-field="quantity" value="${it.quantity}"></label>
+                            <label class="stcf-mini-field"><span>目标范围</span>
+                                <select class="text_pole" data-field="targetType">
+                                    <option value="single_ally" ${it.targetType === 'single_ally' ? 'selected' : ''}>单体友方</option>
+                                    <option value="all_allies" ${it.targetType === 'all_allies' ? 'selected' : ''}>全体友方</option>
+                                    <option value="self" ${it.targetType === 'self' ? 'selected' : ''}>仅自身</option>
+                                    <option value="single_enemy" ${it.targetType === 'single_enemy' ? 'selected' : ''}>单体敌方</option>
+                                    <option value="all_enemies" ${it.targetType === 'all_enemies' ? 'selected' : ''}>全体敌方</option>
+                                </select>
+                            </label>
+                            <label class="stcf-mini-field"><span>效果类型</span>
+                                <select class="text_pole" data-field="effectType">
+                                    <option value="heal" ${it.effectType === 'heal' ? 'selected' : ''}>回复 HP</option>
+                                    <option value="mp_restore" ${it.effectType === 'mp_restore' ? 'selected' : ''}>回复 MP</option>
+                                    <option value="damage" ${it.effectType === 'damage' ? 'selected' : ''}>造成伤害</option>
+                                    <option value="cleanse" ${it.effectType === 'cleanse' ? 'selected' : ''}>净化异常状态</option>
+                                    <option value="utility" ${it.effectType === 'utility' ? 'selected' : ''}>纯状态/特殊槽</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>数值公式</span><input type="text" class="text_pole" data-field="formula" value="${escapeHtml(it.formula)}"></label>
+                            <label class="stcf-mini-field"><span>目标${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="targetGaugeAChange" value="${it.targetGaugeAChange}"></label>
+                            <label class="stcf-mini-field"><span>目标${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="targetGaugeBChange" value="${it.targetGaugeBChange}"></label>
+                        </div>
+                        <label class="stcf-checkbox-row">
+                            <input type="checkbox" data-field="consumesTurn" ${it.consumesTurn !== false ? 'checked' : ''}>
+                            <span>使用消耗行动回合</span>
+                        </label>
+                        <details class="stcf-sub-fold">
+                            <summary>✨ 附加状态列表（支持多选 · 已配 ${applyList.length} 项）</summary>
+                            <div class="stcf-sub-body">
+                                <button type="button" class="menu_button stcf-sm-btn" data-apply-action="add" style="margin-bottom:6px;">➕ 添加附加状态</button>
+                                ${applyRows || '<div class="stcf-muted">暂无附加状态</div>'}
+                            </div>
+                        </details>
+                    </div>
+                </details>
+            `;
+        }).join('');
     }
 
-    bindSimpleListEvents(elItemsEditor, () => deps.getConfig().items, []);
+    elItemsEditor.addEventListener('input', (e) => {
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const item = deps.getConfig().items[Number(card.dataset.index)];
+        if (!item) return;
+        if (e.target.dataset.applyField === 'chance') {
+            const row = e.target.closest('.stcf-apply-row');
+            const ap = item.applyStatuses[Number(row.dataset.applyIndex)];
+            if (ap) { ap.chance = Math.max(0, Math.min(100, Number(e.target.value) || 0)); commitChange(); }
+        }
+    });
+    elItemsEditor.addEventListener('change', (e) => {
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const item = deps.getConfig().items[Number(card.dataset.index)];
+        if (!item) return;
+        if (e.target.dataset.applyField) {
+            const row = e.target.closest('.stcf-apply-row');
+            const ap = item.applyStatuses[Number(row.dataset.applyIndex)];
+            if (ap) { ap[e.target.dataset.applyField] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value; commitChange(); }
+        }
+    });
+    elItemsEditor.addEventListener('click', (e) => {
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const item = deps.getConfig().items[Number(card.dataset.index)];
+        if (!item) return;
+        if (e.target.closest('[data-apply-action="add"]')) {
+            if (!Array.isArray(item.applyStatuses)) item.applyStatuses = [];
+            item.applyStatuses.push({ statusId: deps.getConfig().statuses[0]?.id || '', chance: 100, target: 'target' });
+            commitChange(true);
+        } else if (e.target.closest('[data-apply-action="remove"]')) {
+            const row = e.target.closest('.stcf-apply-row');
+            item.applyStatuses.splice(Number(row.dataset.applyIndex), 1);
+            commitChange(true);
+        }
+    });
+    bindSimpleListEvents(elItemsEditor, () => deps.getConfig().items, ['name']);
 
     // =========================================================================
-    // 六、状态 / Buff 编辑器（v1.2：自由组合效果 + 多属性每回合变化 + 到期转化）
+    // 六、状态 / Buff 编辑器（默认折叠 + 到期转化为多个状态）
     // =========================================================================
     const elStatusesEditor = container.querySelector('#stcf-statuses-editor');
     container.querySelector('#stcf-btn-add-status').addEventListener('click', () => {
         const cfg = deps.getConfig();
+        const id = makeUniqueId('status', cfg.statuses);
         cfg.statuses.push({
-            id: makeUniqueId('status', cfg.statuses),
+            id,
             name: `新状态_${cfg.statuses.length + 1}`,
             icon: '✨',
             description: '自定义组合状态说明',
             skipTurn: false,
-            perTurnHp: -10,
-            perTurnMp: 0,
-            perTurnGaugeA: 0,
-            perTurnGaugeB: 0,
-            atkMultiplier: 1,
-            spiMultiplier: 1,
-            defMultiplier: 1,
-            mdefMultiplier: 1,
+            perTurnHp: -10, perTurnMp: 0, perTurnGaugeA: 0, perTurnGaugeB: 0,
+            atkMultiplier: 1, spiMultiplier: 1, defMultiplier: 1, mdefMultiplier: 1,
             duration: 2,
-            onExpireStatusId: '',
+            onExpireStatusIds: [],
         });
-        commitChange(true);
+        commitChange(true, `st:${id}`);
     });
 
-    function renderStatusesList() {
+    function renderStatusesList(preserveOpen) {
         const cfg = deps.getConfig();
+        const openSet = preserveOpen ? captureOpenCardKeys(elStatusesEditor) : new Set();
         const gAName = cfg.gauges?.gauge_a?.name || '状态槽A';
         const gBName = cfg.gauges?.gauge_b?.name || '状态槽B';
 
-        elStatusesEditor.innerHTML = (cfg.statuses || []).map((st, idx) => `
-            <div class="stcf-item-card" data-index="${idx}">
-                <div class="stcf-item-head">
-                    <input type="text" class="text_pole stcf-icon-input" data-field="icon" value="${escapeHtml(st.icon)}" title="图标 Emoji">
-                    <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(st.name)}" placeholder="状态名称">
-                    <span class="stcf-id-tag">${escapeHtml(st.id)}</span>
-                    <button type="button" class="stcf-del-btn" data-action="delete" title="删除状态">🗑️</button>
-                </div>
-                <div class="stcf-field-row">
-                    <input type="text" class="text_pole" data-field="description" value="${escapeHtml(st.description)}" placeholder="状态效果说明">
-                </div>
-                <label class="stcf-checkbox-row" style="margin-bottom:6px;">
-                    <input type="checkbox" data-field="skipTurn" ${st.skipTurn ? 'checked' : ''}>
-                    <span>💫 跳过行动回合（眩晕/控制效果，可与下方任意属性效果自由叠加）</span>
-                </label>
-                <div class="stcf-grid-4">
-                    <label class="stcf-mini-field"><span>每回合 HP</span><input type="number" class="text_pole" data-field="perTurnHp" value="${st.perTurnHp ?? 0}" title="负数扣血，正数回血"></label>
-                    <label class="stcf-mini-field"><span>每回合 MP</span><input type="number" class="text_pole" data-field="perTurnMp" value="${st.perTurnMp ?? 0}" title="负数耗蓝，正数回蓝"></label>
-                    <label class="stcf-mini-field"><span>每回合${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="perTurnGaugeA" value="${st.perTurnGaugeA ?? 0}"></label>
-                    <label class="stcf-mini-field"><span>每回合${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="perTurnGaugeB" value="${st.perTurnGaugeB ?? 0}"></label>
-                </div>
-                <div class="stcf-grid-3">
-                    <label class="stcf-mini-field"><span>物攻倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="atkMultiplier" value="${st.atkMultiplier}" title="1不变，1.3为+30%"></label>
-                    <label class="stcf-mini-field"><span>精神倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="spiMultiplier" value="${st.spiMultiplier ?? 1}"></label>
-                    <label class="stcf-mini-field"><span>物防倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="defMultiplier" value="${st.defMultiplier}"></label>
-                    <label class="stcf-mini-field"><span>法抗倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="mdefMultiplier" value="${st.mdefMultiplier ?? 1}"></label>
-                    <label class="stcf-mini-field"><span>持续回合数</span><input type="number" min="1" class="text_pole" data-field="duration" value="${st.duration}"></label>
-                </div>
-                <div class="stcf-field-row" style="margin-bottom:0;">
-                    <label>🔄 倒计时结束后自动转化为另一个状态：</label>
-                    <select class="text_pole" data-field="onExpireStatusId">${buildStatusSelectOptions(cfg, st.onExpireStatusId, '无（结束直接移除）')}</select>
-                </div>
-            </div>
-        `).join('');
+        elStatusesEditor.innerHTML = (cfg.statuses || []).map((st, idx) => {
+            const cardKey = `st:${st.id}`;
+            const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
+            const expIds = Array.isArray(st.onExpireStatusIds) ? st.onExpireStatusIds : [];
+
+            return `
+                <details class="stcf-item-card stcf-fold" data-index="${idx}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
+                    <summary class="stcf-fold-summary">
+                        <span class="stcf-fold-title">
+                            ${escapeHtml(st.icon || '✨')} <strong>${escapeHtml(st.name)}</strong>
+                            <small class="stcf-muted">${st.duration}回合${st.skipTurn ? ' · 💫跳回合' : ''}${expIds.length ? ` · 结束转${expIds.length}态` : ''}</small>
+                        </span>
+                        <span class="stcf-fold-right">
+                            <span class="stcf-id-tag">${escapeHtml(st.id)}</span>
+                            <button type="button" class="stcf-del-btn" data-action="delete" title="删除状态">🗑️</button>
+                        </span>
+                    </summary>
+                    <div class="stcf-fold-body">
+                        <div class="stcf-item-head">
+                            <input type="text" class="text_pole stcf-icon-input" data-field="icon" value="${escapeHtml(st.icon)}" title="图标 Emoji">
+                            <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(st.name)}" placeholder="状态名称">
+                        </div>
+                        <div class="stcf-field-row">
+                            <input type="text" class="text_pole" data-field="description" value="${escapeHtml(st.description)}" placeholder="状态效果说明">
+                        </div>
+                        <label class="stcf-checkbox-row" style="margin-bottom:6px;">
+                            <input type="checkbox" data-field="skipTurn" ${st.skipTurn ? 'checked' : ''}>
+                            <span>💫 跳过行动回合（眩晕/冰冻/控制，可与下方属性自由叠加）</span>
+                        </label>
+                        <div class="stcf-grid-4">
+                            <label class="stcf-mini-field"><span>每回合 HP</span><input type="number" class="text_pole" data-field="perTurnHp" value="${st.perTurnHp ?? 0}"></label>
+                            <label class="stcf-mini-field"><span>每回合 MP</span><input type="number" class="text_pole" data-field="perTurnMp" value="${st.perTurnMp ?? 0}"></label>
+                            <label class="stcf-mini-field"><span>每回合${escapeHtml(gAName)}</span><input type="number" class="text_pole" data-field="perTurnGaugeA" value="${st.perTurnGaugeA ?? 0}"></label>
+                            <label class="stcf-mini-field"><span>每回合${escapeHtml(gBName)}</span><input type="number" class="text_pole" data-field="perTurnGaugeB" value="${st.perTurnGaugeB ?? 0}"></label>
+                        </div>
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>物攻倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="atkMultiplier" value="${st.atkMultiplier}"></label>
+                            <label class="stcf-mini-field"><span>精神倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="spiMultiplier" value="${st.spiMultiplier ?? 1}"></label>
+                            <label class="stcf-mini-field"><span>物防倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="defMultiplier" value="${st.defMultiplier}"></label>
+                            <label class="stcf-mini-field"><span>法抗倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="mdefMultiplier" value="${st.mdefMultiplier ?? 1}"></label>
+                            <label class="stcf-mini-field"><span>持续回合数</span><input type="number" min="1" class="text_pole" data-field="duration" value="${st.duration}"></label>
+                        </div>
+                        <details class="stcf-sub-fold">
+                            <summary>🔄 倒计时结束后转化为新状态（支持多选 · 已选 ${expIds.length} 项）</summary>
+                            <div class="stcf-sub-body stcf-chips-wrap">${renderStatusCheckChips(cfg, expIds, 'data-status-expire-id')}</div>
+                        </details>
+                    </div>
+                </details>
+            `;
+        }).join('');
     }
 
+    elStatusesEditor.addEventListener('change', (e) => {
+        if (!e.target.dataset.statusExpireId) return;
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const st = deps.getConfig().statuses[Number(card.dataset.index)];
+        if (!st) return;
+        const set = new Set(st.onExpireStatusIds || []);
+        if (e.target.checked) set.add(e.target.dataset.statusExpireId);
+        else set.delete(e.target.dataset.statusExpireId);
+        st.onExpireStatusIds = [...set];
+        commitChange();
+    });
     bindSimpleListEvents(elStatusesEditor, () => deps.getConfig().statuses, ['name', 'icon']);
 
     // =========================================================================
-    // 七、阈值触发规则编辑器（Prompt 注入 + 自动挂载 Buff + 触发后清零状态槽）
+    // 七、阈值触发规则编辑器（默认折叠 + 达标同时挂载多个 Buff + Prompt 注入）
     // =========================================================================
     const elRulesEditor = container.querySelector('#stcf-rules-editor');
     container.querySelector('#stcf-btn-add-rule').addEventListener('click', () => {
         const cfg = deps.getConfig();
+        const id = makeUniqueId('rule', cfg.triggerRules);
         cfg.triggerRules.push({
-            id: makeUniqueId('rule', cfg.triggerRules),
+            id,
             name: `新触发规则_${cfg.triggerRules.length + 1}`,
             enabled: true,
             scope: 'any_ally',
@@ -1026,7 +1311,7 @@ export async function initSettingsUI(deps) {
             operator: '>=',
             threshold: 100,
             statusId: '',
-            grantStatusId: '',
+            grantStatusIds: [],
             grantStatusMode: 'while_condition',
             resetGaugeOnTrigger: '',
             position: 'in_chat',
@@ -1034,139 +1319,156 @@ export async function initSettingsUI(deps) {
             role: 'system',
             promptText: '[系统战斗事件] {{unit_name}} 触发了特殊阈值条件，请在接下来的剧情中描写对应变化。',
         });
-        commitChange(true);
+        commitChange(true, `rl:${id}`);
     });
 
-    function renderRulesList() {
+    function renderRulesList(preserveOpen) {
         const cfg = deps.getConfig();
+        const openSet = preserveOpen ? captureOpenCardKeys(elRulesEditor) : new Set();
         const gAName = cfg.gauges?.gauge_a?.name || '状态槽A';
         const gBName = cfg.gauges?.gauge_b?.name || '状态槽B';
         const allUnits = [...(cfg.allies || []), ...(cfg.enemies || [])];
 
         elRulesEditor.innerHTML = (cfg.triggerRules || []).map((r, idx) => {
+            const cardKey = `rl:${r.id}`;
+            const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
             const unitOptions = allUnits.map(u =>
                 `<option value="${escapeHtml(u.id)}" ${r.unitId === u.id ? 'selected' : ''}>${escapeHtml(u.name)} (${escapeHtml(u.id)})</option>`
             ).join('');
             const isStatusCond = r.conditionType === 'has_status';
             const isSpecificUnit = r.scope === 'specific_unit';
+            const grantIds = Array.isArray(r.grantStatusIds) ? r.grantStatusIds : [];
 
             return `
-                <div class="stcf-item-card" data-index="${idx}">
-                    <div class="stcf-item-head">
-                        <label class="stcf-inline-check">
-                            <input type="checkbox" data-field="enabled" ${r.enabled ? 'checked' : ''}>
-                            <strong>启用</strong>
-                        </label>
-                        <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(r.name)}" placeholder="规则名称">
-                        <button type="button" class="stcf-del-btn" data-action="delete" title="删除规则">🗑️</button>
-                    </div>
-
-                    <div class="stcf-grid-2">
-                        <label class="stcf-mini-field"><span>监测对象范围</span>
-                            <select class="text_pole" data-field="scope">
-                                <option value="any_ally" ${r.scope === 'any_ally' ? 'selected' : ''}>任意我方角色</option>
-                                <option value="all_allies" ${r.scope === 'all_allies' ? 'selected' : ''}>全体我方角色</option>
-                                <option value="any_enemy" ${r.scope === 'any_enemy' ? 'selected' : ''}>任意敌方角色</option>
-                                <option value="all_enemies" ${r.scope === 'all_enemies' ? 'selected' : ''}>全体敌方角色</option>
-                                <option value="specific_unit" ${r.scope === 'specific_unit' ? 'selected' : ''}>指定某个角色</option>
-                            </select>
-                        </label>
-                        <label class="stcf-mini-field ${isSpecificUnit ? '' : 'stcf-hidden'}"><span>指定角色</span>
-                            <select class="text_pole" data-field="unitId">${unitOptions}</select>
-                        </label>
-                    </div>
-
-                    <div class="stcf-grid-3">
-                        <label class="stcf-mini-field"><span>监测条件</span>
-                            <select class="text_pole" data-field="conditionType">
-                                <option value="hp" ${r.conditionType === 'hp' ? 'selected' : ''}>当前 HP 数值</option>
-                                <option value="hp_percent" ${r.conditionType === 'hp_percent' ? 'selected' : ''}>当前 HP 百分比(%)</option>
-                                <option value="mp" ${r.conditionType === 'mp' ? 'selected' : ''}>当前 MP 数值</option>
-                                <option value="gauge_a" ${r.conditionType === 'gauge_a' ? 'selected' : ''}>${escapeHtml(gAName)} (0-100)</option>
-                                <option value="gauge_b" ${r.conditionType === 'gauge_b' ? 'selected' : ''}>${escapeHtml(gBName)} (0-100)</option>
-                                <option value="has_status" ${r.conditionType === 'has_status' ? 'selected' : ''}>持有指定状态</option>
-                            </select>
-                        </label>
-                        ${isStatusCond ? `
-                            <label class="stcf-mini-field stcf-span-2"><span>监测状态</span>
-                                <select class="text_pole" data-field="statusId">${buildStatusSelectOptions(cfg, r.statusId, '请选择状态...')}</select>
+                <details class="stcf-item-card stcf-fold" data-index="${idx}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
+                    <summary class="stcf-fold-summary">
+                        <span class="stcf-fold-title">
+                            ${r.enabled ? '📌' : '⬜'} <strong>${escapeHtml(r.name)}</strong>
+                            <small class="stcf-muted">${grantIds.length ? `附${grantIds.length}状态` : ''}${r.promptText?.trim() ? ' · 含Prompt' : ''}</small>
+                        </span>
+                        <span class="stcf-fold-right">
+                            <button type="button" class="stcf-del-btn" data-action="delete" title="删除规则">🗑️</button>
+                        </span>
+                    </summary>
+                    <div class="stcf-fold-body">
+                        <div class="stcf-item-head">
+                            <label class="stcf-inline-check">
+                                <input type="checkbox" data-field="enabled" ${r.enabled ? 'checked' : ''}>
+                                <strong>启用</strong>
                             </label>
-                        ` : `
-                            <label class="stcf-mini-field"><span>判断符号</span>
-                                <select class="text_pole" data-field="operator">
-                                    <option value="<=" ${r.operator === '<=' ? 'selected' : ''}>&lt;= 小于等于</option>
-                                    <option value="<" ${r.operator === '<' ? 'selected' : ''}>&lt; 小于</option>
-                                    <option value=">=" ${r.operator === '>=' ? 'selected' : ''}>&gt;= 大于等于</option>
-                                    <option value=">" ${r.operator === '>' ? 'selected' : ''}>&gt; 大于</option>
-                                    <option value="==" ${r.operator === '==' ? 'selected' : ''}>== 等于</option>
+                            <input type="text" class="text_pole stcf-grow" data-field="name" value="${escapeHtml(r.name)}" placeholder="规则名称">
+                        </div>
+                        <div class="stcf-grid-2">
+                            <label class="stcf-mini-field"><span>监测对象范围</span>
+                                <select class="text_pole" data-field="scope">
+                                    <option value="any_ally" ${r.scope === 'any_ally' ? 'selected' : ''}>任意我方角色</option>
+                                    <option value="all_allies" ${r.scope === 'all_allies' ? 'selected' : ''}>全体我方角色</option>
+                                    <option value="any_enemy" ${r.scope === 'any_enemy' ? 'selected' : ''}>任意敌方角色</option>
+                                    <option value="all_enemies" ${r.scope === 'all_enemies' ? 'selected' : ''}>全体敌方角色</option>
+                                    <option value="specific_unit" ${r.scope === 'specific_unit' ? 'selected' : ''}>指定某个角色</option>
                                 </select>
                             </label>
-                            <label class="stcf-mini-field"><span>触发阈值</span>
-                                <input type="number" class="text_pole" data-field="threshold" value="${r.threshold}">
+                            <label class="stcf-mini-field ${isSpecificUnit ? '' : 'stcf-hidden'}"><span>指定角色</span>
+                                <select class="text_pole" data-field="unitId">${unitOptions}</select>
                             </label>
-                        `}
+                        </div>
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>监测条件</span>
+                                <select class="text_pole" data-field="conditionType">
+                                    <option value="hp" ${r.conditionType === 'hp' ? 'selected' : ''}>当前 HP 数值</option>
+                                    <option value="hp_percent" ${r.conditionType === 'hp_percent' ? 'selected' : ''}>当前 HP 百分比(%)</option>
+                                    <option value="mp" ${r.conditionType === 'mp' ? 'selected' : ''}>当前 MP 数值</option>
+                                    <option value="gauge_a" ${r.conditionType === 'gauge_a' ? 'selected' : ''}>${escapeHtml(gAName)} (0-100)</option>
+                                    <option value="gauge_b" ${r.conditionType === 'gauge_b' ? 'selected' : ''}>${escapeHtml(gBName)} (0-100)</option>
+                                    <option value="has_status" ${r.conditionType === 'has_status' ? 'selected' : ''}>持有指定状态</option>
+                                </select>
+                            </label>
+                            ${isStatusCond ? `
+                                <label class="stcf-mini-field stcf-span-2"><span>监测状态</span>
+                                    <select class="text_pole" data-field="statusId">${buildStatusSelectOptions(cfg, r.statusId, '请选择状态...')}</select>
+                                </label>
+                            ` : `
+                                <label class="stcf-mini-field"><span>判断符号</span>
+                                    <select class="text_pole" data-field="operator">
+                                        <option value="<=" ${r.operator === '<=' ? 'selected' : ''}>&lt;= 小于等于</option>
+                                        <option value="<" ${r.operator === '<' ? 'selected' : ''}>&lt; 小于</option>
+                                        <option value=">=" ${r.operator === '>=' ? 'selected' : ''}>&gt;= 大于等于</option>
+                                        <option value=">" ${r.operator === '>' ? 'selected' : ''}>&gt; 大于</option>
+                                        <option value="==" ${r.operator === '==' ? 'selected' : ''}>== 等于</option>
+                                    </select>
+                                </label>
+                                <label class="stcf-mini-field"><span>触发阈值</span>
+                                    <input type="number" class="text_pole" data-field="threshold" value="${r.threshold}">
+                                </label>
+                            `}
+                        </div>
+                        <div class="stcf-grid-2">
+                            <label class="stcf-mini-field"><span>状态挂载模式</span>
+                                <select class="text_pole" data-field="grantStatusMode">
+                                    <option value="while_condition" ${r.grantStatusMode !== 'on_enter' ? 'selected' : ''}>条件维持期间生效(解除即移除)</option>
+                                    <option value="on_enter" ${r.grantStatusMode === 'on_enter' ? 'selected' : ''}>刚达标时挂载一次(按回合倒计时)</option>
+                                </select>
+                            </label>
+                            <label class="stcf-mini-field"><span>触发后清零状态槽(仅达标一次)</span>
+                                <select class="text_pole" data-field="resetGaugeOnTrigger">
+                                    <option value="" ${!r.resetGaugeOnTrigger ? 'selected' : ''}>不清零</option>
+                                    <option value="gauge_a" ${r.resetGaugeOnTrigger === 'gauge_a' ? 'selected' : ''}>清零 ${escapeHtml(gAName)}</option>
+                                    <option value="gauge_b" ${r.resetGaugeOnTrigger === 'gauge_b' ? 'selected' : ''}>清零 ${escapeHtml(gBName)}</option>
+                                </select>
+                            </label>
+                        </div>
+                        <details class="stcf-sub-fold">
+                            <summary>⚡ 达标自动附加状态（支持多选 · 已选 ${grantIds.length} 项）</summary>
+                            <div class="stcf-sub-body stcf-chips-wrap">${renderStatusCheckChips(cfg, grantIds, 'data-rule-grant-status')}</div>
+                        </details>
+                        <div class="stcf-grid-3" style="margin-top:6px;">
+                            <label class="stcf-mini-field"><span>提示词注入位置</span>
+                                <select class="text_pole" data-field="position">
+                                    <option value="in_chat" ${r.position === 'in_chat' ? 'selected' : ''}>聊天深度插入(推荐)</option>
+                                    <option value="in_prompt" ${r.position === 'in_prompt' ? 'selected' : ''}>主提示词内</option>
+                                    <option value="before_prompt" ${r.position === 'before_prompt' ? 'selected' : ''}>主提示词前</option>
+                                </select>
+                            </label>
+                            <label class="stcf-mini-field"><span>插入深度</span><input type="number" min="0" max="20" class="text_pole" data-field="depth" value="${r.depth}"></label>
+                            <label class="stcf-mini-field"><span>消息角色</span>
+                                <select class="text_pole" data-field="role">
+                                    <option value="system" ${r.role === 'system' ? 'selected' : ''}>System</option>
+                                    <option value="user" ${r.role === 'user' ? 'selected' : ''}>User</option>
+                                    <option value="assistant" ${r.role === 'assistant' ? 'selected' : ''}>Assistant</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="stcf-field-row" style="margin-bottom:0;">
+                            <label>自动注入的剧情引导提示词（留空则仅触发 Buff）：</label>
+                            <textarea class="text_pole stcf-prompt-textarea" rows="3" data-field="promptText">${escapeHtml(r.promptText)}</textarea>
+                        </div>
                     </div>
-
-                    <!-- v1.1 新增：达标自动挂载 Buff/Debuff -->
-                    <div class="stcf-grid-3">
-                        <label class="stcf-mini-field"><span>⚡ 达标自动附加状态</span>
-                            <select class="text_pole" data-field="grantStatusId">${buildStatusSelectOptions(cfg, r.grantStatusId, '不附加状态')}</select>
-                        </label>
-                        <label class="stcf-mini-field"><span>状态挂载模式</span>
-                            <select class="text_pole" data-field="grantStatusMode">
-                                <option value="while_condition" ${r.grantStatusMode !== 'on_enter' ? 'selected' : ''}>条件维持期间生效(解除即移除)</option>
-                                <option value="on_enter" ${r.grantStatusMode === 'on_enter' ? 'selected' : ''}>刚达标时挂载一次(按回合倒计时)</option>
-                            </select>
-                        </label>
-                        <label class="stcf-mini-field"><span>触发后清零状态槽(仅达标一次)</span>
-                            <select class="text_pole" data-field="resetGaugeOnTrigger">
-                                <option value="" ${!r.resetGaugeOnTrigger ? 'selected' : ''}>不清零</option>
-                                <option value="gauge_a" ${r.resetGaugeOnTrigger === 'gauge_a' ? 'selected' : ''}>清零 ${escapeHtml(gAName)}</option>
-                                <option value="gauge_b" ${r.resetGaugeOnTrigger === 'gauge_b' ? 'selected' : ''}>清零 ${escapeHtml(gBName)}</option>
-                            </select>
-                        </label>
-                    </div>
-
-                    <div class="stcf-grid-3">
-                        <label class="stcf-mini-field"><span>提示词注入位置</span>
-                            <select class="text_pole" data-field="position">
-                                <option value="in_chat" ${r.position === 'in_chat' ? 'selected' : ''}>聊天深度插入(推荐)</option>
-                                <option value="in_prompt" ${r.position === 'in_prompt' ? 'selected' : ''}>主提示词内</option>
-                                <option value="before_prompt" ${r.position === 'before_prompt' ? 'selected' : ''}>主提示词前</option>
-                            </select>
-                        </label>
-                        <label class="stcf-mini-field"><span>插入深度(Depth)</span>
-                            <input type="number" min="0" max="20" class="text_pole" data-field="depth" value="${r.depth}">
-                        </label>
-                        <label class="stcf-mini-field"><span>消息角色</span>
-                            <select class="text_pole" data-field="role">
-                                <option value="system" ${r.role === 'system' ? 'selected' : ''}>System</option>
-                                <option value="user" ${r.role === 'user' ? 'selected' : ''}>User</option>
-                                <option value="assistant" ${r.role === 'assistant' ? 'selected' : ''}>Assistant</option>
-                            </select>
-                        </label>
-                    </div>
-
-                    <div class="stcf-field-row">
-                        <label>条件达成时自动注入的剧情引导提示词（留空则仅触发 Buff，不注入提示词）：</label>
-                        <textarea class="text_pole stcf-prompt-textarea" rows="3" data-field="promptText" placeholder="写下你想引导 AI 描写的战斗结果或特殊剧情...">${escapeHtml(r.promptText)}</textarea>
-                    </div>
-                </div>
+                </details>
             `;
         }).join('');
     }
 
-    bindSimpleListEvents(elRulesEditor, () => deps.getConfig().triggerRules, ['scope', 'conditionType']);
+    elRulesEditor.addEventListener('change', (e) => {
+        if (!e.target.dataset.ruleGrantStatus) return;
+        const card = e.target.closest('.stcf-item-card');
+        if (!card) return;
+        const rule = deps.getConfig().triggerRules[Number(card.dataset.index)];
+        if (!rule) return;
+        const set = new Set(rule.grantStatusIds || []);
+        if (e.target.checked) set.add(e.target.dataset.ruleGrantStatus);
+        else set.delete(e.target.dataset.ruleGrantStatus);
+        rule.grantStatusIds = [...set];
+        commitChange();
+    });
+    bindSimpleListEvents(elRulesEditor, () => deps.getConfig().triggerRules, ['scope', 'conditionType', 'enabled']);
 
-    /** 通用列表事件绑定助手（避免重复样板代码） */
     function bindSimpleListEvents(hostEl, getListFn, reRenderFields = []) {
         hostEl.addEventListener('input', (e) => {
             const card = e.target.closest('.stcf-item-card');
             if (!card || !e.target.dataset.field || e.target.type === 'checkbox') return;
             const item = getListFn()[Number(card.dataset.index)];
             if (!item) return;
-            const field = e.target.dataset.field;
-            item[field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
+            item[e.target.dataset.field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
             commitChange();
         });
         hostEl.addEventListener('change', (e) => {
@@ -1182,13 +1484,14 @@ export async function initSettingsUI(deps) {
         hostEl.addEventListener('click', (e) => {
             const delBtn = e.target.closest('[data-action="delete"]');
             if (!delBtn) return;
+            e.preventDefault();
             const card = delBtn.closest('.stcf-item-card');
             getListFn().splice(Number(card.dataset.index), 1);
             commitChange(true);
         });
     }
 
-    function renderAll() {
+    function renderAll(preserveOpen = false) {
         const cfg = deps.getConfig();
         const profileInfo = getCurrentProfileInfo();
         const usePerChar = cfg.general.usePerCharacterConfig !== false;
@@ -1232,17 +1535,17 @@ export async function initSettingsUI(deps) {
         elGainMdef.value = String(gains.mdefMag ?? 2);
 
         renderWorldviewsPicker();
-        renderClassesList();
-        renderUnitsList('ally', elAlliesEditor);
-        renderUnitsList('enemy', elEnemiesEditor);
-        renderSkillsList();
-        renderEquipmentsList();
-        renderItemsList();
-        renderStatusesList();
-        renderRulesList();
+        renderClassesList(preserveOpen);
+        renderUnitsList('ally', elAlliesEditor, preserveOpen);
+        renderUnitsList('enemy', elEnemiesEditor, preserveOpen);
+        renderSkillsList(preserveOpen);
+        renderEquipmentsList(preserveOpen);
+        renderItemsList(preserveOpen);
+        renderStatusesList(preserveOpen);
+        renderRulesList(preserveOpen);
     }
 
-    renderAll();
+    renderAll(false);
 
-    return { renderAll };
+    return { renderAll: () => renderAll(true) };
 }

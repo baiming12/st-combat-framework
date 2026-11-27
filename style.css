@@ -1052,3 +1052,98 @@
 .stcf-unlock-row input[type="number"] {
     width: 66px;
 }
+
+/* ==================== v1.6 新增样式：默认折叠卡片、子折叠区、多状态附加行 ==================== */
+.stcf-fold {
+    padding: 0 !important;
+    overflow: hidden;
+}
+
+.stcf-fold-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 7px 9px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.stcf-fold-summary::-webkit-details-marker {
+    display: none;
+}
+
+.stcf-fold-summary::before {
+    content: "▸";
+    font-size: 11px;
+    opacity: 0.7;
+    margin-right: 4px;
+    transition: transform 0.15s ease;
+}
+
+.stcf-fold[open] > .stcf-fold-summary::before {
+    transform: rotate(90deg);
+}
+
+.stcf-fold-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.stcf-fold-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
+.stcf-fold-body {
+    padding: 8px 9px 9px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.12);
+}
+
+.stcf-sub-fold {
+    margin-top: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.18);
+}
+
+.stcf-sub-fold > summary {
+    padding: 5px 8px;
+    font-size: 11.5px;
+    cursor: pointer;
+    user-select: none;
+    opacity: 0.92;
+}
+
+.stcf-sub-body {
+    padding: 6px 8px 8px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.stcf-apply-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 5px;
+}
+
+.stcf-apply-row select:first-child {
+    flex: 1;
+    min-width: 0;
+}
+
+.stcf-pct-input {
+    width: 58px !important;
+}
+
+.stcf-tgt-select {
+    width: 78px !important;
+}
