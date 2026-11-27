@@ -117,6 +117,8 @@ function normalizeUnitTemplate(rawUnit, side, index) {
         initialGaugeB: clamp(rawUnit?.initialGaugeB ?? 0, 0, 100),
         skillIds: Array.isArray(rawUnit?.skillIds) ? rawUnit.skillIds.map(String) : [],
         equipmentIds: Array.isArray(rawUnit?.equipmentIds) ? rawUnit.equipmentIds.map(String) : [],
+        aiStrategy: ['priority', 'weighted', 'random'].includes(rawUnit?.aiStrategy) ? rawUnit.aiStrategy : 'priority',
+        autoControl: side === 'ally' ? Boolean(rawUnit?.autoControl) : false,
     };
 }
 
@@ -147,6 +149,8 @@ export function normalizeSkill(sk, idx = 0) {
         requiredTargetStatusIds: Array.isArray(sk?.requiredTargetStatusIds)
             ? sk.requiredTargetStatusIds.map(String).filter(Boolean)
             : [],
+        aiPriority: Math.max(1, Math.round(Number(sk?.aiPriority ?? 10) || 10)),
+        aiHpBelowPercent: clamp(sk?.aiHpBelowPercent ?? 100, 1, 100),
     };
 }
 

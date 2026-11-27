@@ -644,6 +644,7 @@ export async function initHudUI(deps) {
 
         const equipCount = (unit.equipmentIds || []).length;
         const equipBadge = equipCount > 0 ? `<span class="stcf-equip-count" title="已穿戴 ${equipCount} 件装备">🛡️${equipCount}</span>` : '';
+        const autoBadge = (unit.side === 'ally' && unit.autoControl) ? '<span class="stcf-unit-tag stcf-tag-stun" title="已开启自动托管 AI">🤖托管</span>' : '';
 
         const gmHtml = gmMode ? `
             <div class="stcf-gm-row">
@@ -673,6 +674,7 @@ export async function initHudUI(deps) {
                     <div class="stcf-unit-name-wrap">
                         <span class="stcf-unit-name">${escapeHtml(unit.name)}</span>
                         ${stateTag}
+                        ${autoBadge}
                         ${equipBadge}
                     </div>
                     <div class="stcf-unit-top-right">

@@ -245,6 +245,8 @@ export async function initSettingsUI(deps) {
             initialGaugeB: 0,
             skillIds: cfg.skills[0] ? [cfg.skills[0].id] : [],
             equipmentIds: [],
+            aiStrategy: 'priority',
+            autoControl: false,
         });
         commitChange(true);
     }
@@ -295,6 +297,21 @@ export async function initSettingsUI(deps) {
                         <label class="stcf-mini-field"><span>初始${escapeHtml(gAName)}</span><input type="number" min="0" max="100" class="text_pole" data-field="initialGaugeA" value="${u.initialGaugeA}"></label>
                         <label class="stcf-mini-field"><span>初始${escapeHtml(gBName)}</span><input type="number" min="0" max="100" class="text_pole" data-field="initialGaugeB" value="${u.initialGaugeB}"></label>
                     </div>
+                    <div class="stcf-grid-2">
+                        <label class="stcf-mini-field"><span>AI 出招策略</span>
+                            <select class="text_pole" data-field="aiStrategy">
+                                <option value="priority" ${u.aiStrategy !== 'weighted' && u.aiStrategy !== 'random' ? 'selected' : ''}>高优先级优先(推荐)</option>
+                                <option value="weighted" ${u.aiStrategy === 'weighted' ? 'selected' : ''}>按优先级权重随机</option>
+                                <option value="random" ${u.aiStrategy === 'random' ? 'selected' : ''}>完全随机</option>
+                            </select>
+                        </label>
+                        ${side === 'ally' ? `
+                            <label class="stcf-inline-check" style="margin-top:16px;">
+                                <input type="checkbox" data-field="autoControl" ${u.autoControl ? 'checked' : ''}>
+                                <span>🤖 自动托管 AI（我方自动出招）</span>
+                            </label>
+                        ` : '<div></div>'}
+                    </div>
                     <div class="stcf-skill-assign">
                         <div class="stcf-sub-label">可用技能：</div>
                         <div class="stcf-chips-wrap">${skillChecks || '<span class="stcf-muted">暂无技能</span>'}</div>
@@ -331,6 +348,12 @@ export async function initSettingsUI(deps) {
 
             if (e.target.dataset.field === 'enabled') {
                 unit.enabled = e.target.checked;
+                commitChange();
+            } else if (e.target.dataset.field === 'autoControl') {
+                unit.autoControl = e.target.checked;
+                commitChange();
+            } else if (e.target.dataset.field === 'aiStrategy') {
+                unit.aiStrategy = e.target.value;
                 commitChange();
             } else if (e.target.dataset.unitSkill) {
                 const set = new Set(unit.skillIds || []);
@@ -384,6 +407,8 @@ export async function initSettingsUI(deps) {
             applyStatusChance: 100,
             applyStatusTarget: 'target',
             requiredTargetStatusIds: [],
+            aiPriority: 10,
+            aiHpBelowPercent: 100,
         });
         commitChange(true);
     });
@@ -462,6 +487,10 @@ export async function initSettingsUI(deps) {
                             <option value="self" ${sk.applyStatusTarget === 'self' ? 'selected' : ''}>释放者自己</option>
                         </select>
                     </label>
+                </div>
+                <div class="stcf-grid-2">
+                    <label class="stcf-mini-field"><span>AI 释放优先级（越大越优先）</span><input type="number" min="1" class="text_pole" data-field="aiPriority" value="${sk.aiPriority ?? 10}"></label>
+                    <label class="stcf-mini-field"><span>AI 仅在 HP ≤ (%) 时释放（100=不限）</span><input type="number" min="1" max="100" class="text_pole" data-field="aiHpBelowPercent" value="${sk.aiHpBelowPercent ?? 100}" title="治疗技判断友方血量%，攻击/自身技判断释放者自身血量%"></label>
                 </div>
                 <div class="stcf-skill-assign" style="margin-top:6px;">
                     <div class="stcf-sub-label">🔒 释放前置状态（目标持有以下<strong>任意 1 个</strong>才可释放，全不勾则无限制）：</div>

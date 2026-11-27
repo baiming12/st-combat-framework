@@ -411,6 +411,8 @@ function instantiateUnit(tpl, side, config) {
         },
         skillIds: Array.isArray(tpl.skillIds) ? [...tpl.skillIds] : [],
         equipmentIds: Array.isArray(tpl.equipmentIds) ? [...tpl.equipmentIds] : [],
+        aiStrategy: ['priority', 'weighted', 'random'].includes(tpl.aiStrategy) ? tpl.aiStrategy : 'priority',
+        autoControl: side === 'ally' ? Boolean(tpl.autoControl) : false,
         statuses: [],
         hasActed: false,
     };
@@ -744,7 +746,10 @@ export function checkBattleOutcome(state) {
 }
 
 export function syncDefaultSelections(state) {
-    const readyAlly = state.allies.find(u => isAlive(u) && !u.hasActed)
+    // 优先选中存活且尚未行动的手动操作角色，其次托管角色
+    const readyManualAlly = state.allies.find(u => isAlive(u) && !u.hasActed && !u.autoControl);
+    const readyAlly = readyManualAlly
+        || state.allies.find(u => isAlive(u) && !u.hasActed)
         || state.allies.find(isAlive)
         || state.allies[0];
     const currentActor = findUnitById(state, state.selectedActorId);
@@ -778,6 +783,112 @@ function preparePlayerTurn(state, config) {
 }
 
 /**
+ * 通用 AI 选招引擎（敌方单位与开启“自动托管”的我方队友共用）
+ * 支持：
+ * 1. 校验 MP 消耗、技能前置状态条件 (requiredTargetStatusIds) 与血量阈值 (aiHpBelowPercent，防满血空奶)
+ * 2. 支持三种策略：priority(高优先级优先) / weighted(按优先级权重随机) / random(完全随机)
+ * @param {object} state
+ * @param {object} config
+ * @param {object} actor
+ * @returns {{ skill: object, targetId: string } | null}
+ */
+export function pickAiSkillAndTarget(state, config, actor) {
+    const friends = actor.side === 'ally' ? state.allies : state.enemies;
+    const foes = actor.side === 'ally' ? state.enemies : state.allies;
+    const actorHpPct = actor.maxHp > 0 ? (actor.hp / actor.maxHp) * 100 : 100;
+
+    const pickTargetForSkill = (sk) => {
+        const reqIds = Array.isArray(sk.requiredTargetStatusIds) ? sk.requiredTargetStatusIds.filter(Boolean) : [];
+        const reqSet = new Set(reqIds);
+        const hasReq = (u) => reqSet.size === 0 || (u.statuses || []).some(st => reqSet.has(st.statusId));
+        const hpLimit = clamp(sk.aiHpBelowPercent ?? 100, 1, 100);
+        const underHp = (u) => (u.maxHp > 0 ? (u.hp / u.maxHp) * 100 : 100) <= hpLimit;
+
+        if (sk.targetType === 'single_ally') {
+            const list = friends
+                .filter(u => isAlive(u) && hasReq(u) && underHp(u))
+                .sort((a, b) => (a.hp / a.maxHp) - (b.hp / b.maxHp));
+            return list[0]?.id || null;
+        }
+        if (sk.targetType === 'all_allies') {
+            const aliveFriends = friends.filter(isAlive);
+            if (aliveFriends.length === 0) return null;
+            if (!aliveFriends.some(underHp)) return null;
+            return checkSkillPrerequisite(state, config, actor, sk, '').ok ? '' : null;
+        }
+        if (sk.targetType === 'self') {
+            return (hasReq(actor) && actorHpPct <= hpLimit) ? actor.id : null;
+        }
+        if (sk.targetType === 'single_enemy') {
+            if (actorHpPct > hpLimit) return null;
+            const list = foes.filter(u => isAlive(u) && hasReq(u));
+            return list.length > 0 ? list[Math.floor(Math.random() * list.length)].id : null;
+        }
+        // all_enemies
+        if (actorHpPct > hpLimit) return null;
+        return checkSkillPrerequisite(state, config, actor, sk, '').ok ? '' : null;
+    };
+
+    const candidatePairs = getUnitAvailableSkills(actor, config)
+        .map(entry => entry.skill)
+        .filter(sk => sk && actor.mp >= sk.mpCost)
+        .map(sk => ({ skill: sk, targetId: pickTargetForSkill(sk) }))
+        .filter(pair => pair.targetId !== null);
+
+    if (candidatePairs.length === 0) {
+        const fallbackSkill = (config.skills || []).find(
+            sk => sk.mpCost <= actor.mp && pickTargetForSkill(sk) !== null
+        );
+        return fallbackSkill ? { skill: fallbackSkill, targetId: pickTargetForSkill(fallbackSkill) } : null;
+    }
+
+    const strategy = actor.aiStrategy || 'priority';
+
+    if (strategy === 'random') {
+        return candidatePairs[Math.floor(Math.random() * candidatePairs.length)];
+    }
+
+    if (strategy === 'weighted') {
+        const weights = candidatePairs.map(p => Math.max(1, Number(p.skill.aiPriority ?? 10) || 10));
+        const total = weights.reduce((sum, w) => sum + w, 0);
+        let roll = Math.random() * total;
+        for (let i = 0; i < candidatePairs.length; i++) {
+            roll -= weights[i];
+            if (roll <= 0) return candidatePairs[i];
+        }
+        return candidatePairs[candidatePairs.length - 1];
+    }
+
+    // 默认 priority：取当前可放技能中 aiPriority 最高的一档（并列最高则随机）
+    let maxPrio = -Infinity;
+    for (const pair of candidatePairs) {
+        const p = Number(pair.skill.aiPriority ?? 10) || 10;
+        if (p > maxPrio) maxPrio = p;
+    }
+    const topPairs = candidatePairs.filter(pair => (Number(pair.skill.aiPriority ?? 10) || 10) === maxPrio);
+    return topPairs[Math.floor(Math.random() * topPairs.length)];
+}
+
+/**
+ * 执行所有开启了“自动托管 AI”且尚未行动的存活我方角色
+ */
+function runAutoAlliesTurn(state, config) {
+    for (const ally of state.allies) {
+        if (!isAlive(ally) || ally.hasActed || !ally.autoControl) continue;
+        if (checkBattleOutcome(state)) return;
+
+        const chosenPair = pickAiSkillAndTarget(state, config, ally);
+        if (!chosenPair) {
+            ally.hasActed = true;
+            appendBattleLog(state, `${ally.name}（托管）暂无可用技能，本回合待命。`);
+            continue;
+        }
+        performSkill(state, config, ally, chosenPair.skill, chosenPair.targetId);
+        if (checkBattleOutcome(state)) return;
+    }
+}
+
+/**
  * 玩家释放技能
  */
 export function executeAllyAction(state, config, actorId, skillId, targetId) {
@@ -798,6 +909,16 @@ export function executeAllyAction(state, config, actorId, skillId, targetId) {
     if (checkBattleOutcome(state)) {
         syncDefaultSelections(state);
         return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+    }
+
+    // 若所有手动操作角色均已行动，则自动执行托管队友的行动
+    const hasRemainingManual = state.allies.some(u => isAlive(u) && !u.hasActed && !u.autoControl);
+    if (!hasRemainingManual) {
+        runAutoAlliesTurn(state, config);
+        if (checkBattleOutcome(state)) {
+            syncDefaultSelections(state);
+            return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+        }
     }
 
     const hasRemainingActor = state.allies.some(u => isAlive(u) && !u.hasActed);
@@ -890,6 +1011,14 @@ export function executeUseItem(state, config, actorId, itemId, targetId) {
     }
 
     if (item.consumesTurn) {
+        const hasRemainingManual = state.allies.some(u => isAlive(u) && !u.hasActed && !u.autoControl);
+        if (!hasRemainingManual) {
+            runAutoAlliesTurn(state, config);
+            if (checkBattleOutcome(state)) {
+                syncDefaultSelections(state);
+                return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+            }
+        }
         const hasRemainingActor = state.allies.some(u => isAlive(u) && !u.hasActed);
         if (!hasRemainingActor && config.general?.autoEndPlayerTurn !== false) {
             runEnemyTurnAndRoundEnd(state, config);
@@ -970,6 +1099,12 @@ export function endPlayerTurn(state, config) {
     if (state.phase !== 'player_turn') return { ok: false, message: '当前战斗已结束或不在我方回合。', newLogs: [] };
 
     const logStartIndex = state.currentRoundLogs.length;
+    // 结束我方回合前，先让未行动的自动托管队友出招
+    runAutoAlliesTurn(state, config);
+    if (checkBattleOutcome(state)) {
+        syncDefaultSelections(state);
+        return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+    }
     runEnemyTurnAndRoundEnd(state, config);
     return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
 }
@@ -987,40 +1122,7 @@ function runEnemyTurnAndRoundEnd(state, config) {
             continue;
         }
 
-        // 为敌方挑选满足 MP 消耗且满足前置状态条件的可用技能与目标
-        const pickValidTargetForEnemySkill = (sk) => {
-            const reqIds = Array.isArray(sk.requiredTargetStatusIds) ? sk.requiredTargetStatusIds.filter(Boolean) : [];
-            const reqSet = new Set(reqIds);
-            const hasReq = (u) => reqSet.size === 0 || (u.statuses || []).some(st => reqSet.has(st.statusId));
-
-            if (sk.targetType === 'single_ally') {
-                const list = state.enemies.filter(u => isAlive(u) && hasReq(u))
-                    .sort((a, b) => (a.hp / a.maxHp) - (b.hp / b.maxHp));
-                return list[0]?.id || null;
-            }
-            if (sk.targetType === 'single_enemy') {
-                const list = state.allies.filter(u => isAlive(u) && hasReq(u));
-                return list.length > 0 ? list[Math.floor(Math.random() * list.length)].id : null;
-            }
-            if (sk.targetType === 'self') {
-                return hasReq(enemy) ? enemy.id : null;
-            }
-            return checkSkillPrerequisite(state, config, enemy, sk, '').ok ? '' : null;
-        };
-
-        const candidatePairs = getUnitAvailableSkills(enemy, config)
-            .map(entry => entry.skill)
-            .filter(sk => sk && enemy.mp >= sk.mpCost)
-            .map(sk => ({ skill: sk, targetId: pickValidTargetForEnemySkill(sk) }))
-            .filter(pair => pair.targetId !== null);
-
-        const fallbackSkill = (config.skills || []).find(
-            sk => sk.mpCost <= enemy.mp && pickValidTargetForEnemySkill(sk) !== null
-        );
-        const chosenPair = candidatePairs.length > 0
-            ? candidatePairs[Math.floor(Math.random() * candidatePairs.length)]
-            : (fallbackSkill ? { skill: fallbackSkill, targetId: pickValidTargetForEnemySkill(fallbackSkill) } : null);
-
+        const chosenPair = pickAiSkillAndTarget(state, config, enemy);
         if (!chosenPair) {
             appendBattleLog(state, `${enemy.name} 暂无可满足释放条件的技能，本回合原地待命。`);
             continue;

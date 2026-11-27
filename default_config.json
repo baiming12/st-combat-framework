@@ -157,7 +157,9 @@
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
-            "applyStatusTarget": "target"
+            "applyStatusTarget": "target",
+            "aiPriority": 10,
+            "aiHpBelowPercent": 100
         },
         {
             "id": "skill_02",
@@ -173,7 +175,9 @@
             "targetGaugeBChange": 0,
             "applyStatusId": "debuff_01",
             "applyStatusChance": 80,
-            "applyStatusTarget": "target"
+            "applyStatusTarget": "target",
+            "aiPriority": 40,
+            "aiHpBelowPercent": 100
         },
         {
             "id": "skill_03",
@@ -189,7 +193,9 @@
             "targetGaugeBChange": 10,
             "applyStatusId": "debuff_02",
             "applyStatusChance": 50,
-            "applyStatusTarget": "target"
+            "applyStatusTarget": "target",
+            "aiPriority": 55,
+            "aiHpBelowPercent": 100
         },
         {
             "id": "skill_04",
@@ -205,7 +211,9 @@
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
-            "applyStatusTarget": "target"
+            "applyStatusTarget": "target",
+            "aiPriority": 80,
+            "aiHpBelowPercent": 65
         },
         {
             "id": "skill_05",
@@ -222,7 +230,9 @@
             "applyStatusId": "buff_01",
             "applyStatusChance": 100,
             "applyStatusTarget": "target",
-            "requiredTargetStatusIds": []
+            "requiredTargetStatusIds": [],
+            "aiPriority": 35,
+            "aiHpBelowPercent": 100
         },
         {
             "id": "skill_06",
@@ -243,7 +253,9 @@
                 "debuff_01",
                 "debuff_02",
                 "debuff_03"
-            ]
+            ],
+            "aiPriority": 90,
+            "aiHpBelowPercent": 100
         },
         {
             "id": "skill_enemy_01",
@@ -259,7 +271,9 @@
             "targetGaugeBChange": 0,
             "applyStatusId": "",
             "applyStatusChance": 100,
-            "applyStatusTarget": "target"
+            "applyStatusTarget": "target",
+            "aiPriority": 10,
+            "aiHpBelowPercent": 100
         },
         {
             "id": "skill_enemy_02",
@@ -275,7 +289,9 @@
             "targetGaugeBChange": 10,
             "applyStatusId": "debuff_03",
             "applyStatusChance": 70,
-            "applyStatusTarget": "target"
+            "applyStatusTarget": "target",
+            "aiPriority": 50,
+            "aiHpBelowPercent": 100
         }
     ],
     "equipments": [
