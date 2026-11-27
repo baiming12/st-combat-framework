@@ -1,0 +1,91 @@
+<!-- TRPG 通用回合制战斗 HUD 悬浮面板（默认折叠为迷你浮标，适配 TauriTavern 窄屏防遮挡） -->
+<div id="stcf-hud-root" class="stcf-hud-root stcf-collapsed" aria-label="TRPG 战斗面板">
+    <!-- 折叠态：迷你可拖拽浮标 -->
+    <button type="button" id="stcf-collapsed-pill" class="stcf-collapsed-pill" title="点击展开战斗面板（按住可拖动位置）">
+        <span class="stcf-pill-icon">⚔️</span>
+        <span class="stcf-pill-text">战斗面板</span>
+        <span id="stcf-pill-badge" class="stcf-pill-badge">待机</span>
+    </button>
+
+    <!-- 展开态：紧凑型 4v4 战斗悬浮窗 -->
+    <div id="stcf-hud-panel" class="stcf-hud-panel">
+        <!-- 顶部标题与控制条（可拖拽） -->
+        <div id="stcf-hud-header" class="stcf-hud-header">
+            <div class="stcf-header-left">
+                <span class="stcf-title">⚔️ TRPG 战斗</span>
+                <span id="stcf-phase-badge" class="stcf-phase-badge">未开始</span>
+                <span id="stcf-turn-badge" class="stcf-turn-badge">T0</span>
+            </div>
+            <div class="stcf-header-actions">
+                <button type="button" id="stcf-btn-gm-mode" class="stcf-icon-btn" title="开关手动数值微调模式">🛠️</button>
+                <button type="button" id="stcf-btn-start-reset" class="stcf-btn stcf-btn-primary stcf-btn-sm">开始战斗</button>
+                <button type="button" id="stcf-btn-collapse" class="stcf-icon-btn" title="折叠回迷你浮标">➖</button>
+            </div>
+        </div>
+
+        <!-- 阈值 Prompt 注入实时状态提示条（有生效规则时自动高亮显示） -->
+        <div id="stcf-prompt-bar" class="stcf-prompt-bar stcf-hidden">
+            <div id="stcf-prompt-bar-toggle" class="stcf-prompt-bar-summary">
+                <span>📌 已自动注入剧情提示词：<strong id="stcf-prompt-count">0</strong> 条（点击展开预览）</span>
+            </div>
+            <div id="stcf-prompt-preview" class="stcf-prompt-preview stcf-hidden"></div>
+        </div>
+
+        <!-- 内部可滚动主体区域（防止 4v4 时撑爆窄屏或遮挡聊天输入框） -->
+        <div class="stcf-hud-body">
+            <!-- 未开启战斗时的引导提示 -->
+            <div id="stcf-idle-placeholder" class="stcf-idle-placeholder">
+                <p>当前尚未开始战斗。</p>
+                <p class="stcf-muted">点击右上角 <strong>「开始战斗」</strong> 即可按你在扩展设置中配置的我方/敌方队伍（最多 4v4）开战。</p>
+            </div>
+
+            <!-- 战斗中区域 -->
+            <div id="stcf-battle-area" class="stcf-hidden">
+                <!-- 窄屏切换标签（宽屏下自动隐藏，直接左右双栏显示） -->
+                <div class="stcf-mobile-tabs">
+                    <button type="button" class="stcf-mobile-tab active" data-side="both">全览</button>
+                    <button type="button" class="stcf-mobile-tab" data-side="allies">我方</button>
+                    <button type="button" class="stcf-mobile-tab" data-side="enemies">敌方</button>
+                </div>
+
+                <!-- 双方战场单位区 -->
+                <div id="stcf-battlefield" class="stcf-battlefield" data-view="both">
+                    <div class="stcf-side-col stcf-allies-col">
+                        <div class="stcf-side-title">我方阵营 <span class="stcf-side-hint">（点卡片切换行动者）</span></div>
+                        <div id="stcf-allies-list" class="stcf-units-list"></div>
+                    </div>
+                    <div class="stcf-side-col stcf-enemies-col">
+                        <div class="stcf-side-title">敌方阵营 <span class="stcf-side-hint">（点卡片选瞄准目标）</span></div>
+                        <div id="stcf-enemies-list" class="stcf-units-list"></div>
+                    </div>
+                </div>
+
+                <!-- 操作与技能栏 -->
+                <div class="stcf-action-box">
+                    <div class="stcf-action-meta">
+                        <span>当前行动：<strong id="stcf-current-actor-name">-</strong></span>
+                        <span>瞄准目标：<strong id="stcf-current-target-name">-</strong></span>
+                    </div>
+                    <div id="stcf-skills-bar" class="stcf-skills-bar"></div>
+                    <div class="stcf-turn-controls">
+                        <button type="button" id="stcf-btn-end-turn" class="stcf-btn stcf-btn-warn">结束我方回合</button>
+                        <button type="button" id="stcf-btn-copy-log" class="stcf-btn stcf-btn-secondary" title="将本回合战报复制到剪贴板">📋 复制战报</button>
+                        <button type="button" id="stcf-btn-fill-input" class="stcf-btn stcf-btn-secondary" title="将本回合战报填入聊天输入框（不会自动发送）">✏️ 填入输入框</button>
+                    </div>
+                </div>
+
+                <!-- 实时战报预览区 -->
+                <div class="stcf-log-box">
+                    <div class="stcf-log-header">
+                        <span>📜 战斗日志</span>
+                        <button type="button" id="stcf-btn-clear-round-log" class="stcf-link-btn" title="清空当前回合待导出战报">清空本轮记录</button>
+                    </div>
+                    <div id="stcf-log-list" class="stcf-log-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 轻量 Toast 提示（如“已复制到剪贴板”、“已填入输入框”） -->
+        <div id="stcf-toast" class="stcf-toast stcf-hidden"></div>
+    </div>
+</div>

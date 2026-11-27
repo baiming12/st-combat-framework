@@ -1,0 +1,12 @@
+{
+    "display_name": "TRPG 通用回合制战斗框架 (Combat Framework)",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "baiming12",
+    "version": "1.0.0",
+    "homePage": "https://github.com/baiming12/st-combat-framework",
+    "auto_update": true
+}

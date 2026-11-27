@@ -1,0 +1,872 @@
+/* ==========================================================================
+   TRPG 通用回合制战斗框架样式表 (style.css)
+   特性：
+   1. 自动适配 SillyTavern / TauriTavern 主题变量（并提供深色安全回退）
+   2. 默认折叠为角落迷你浮标，绝不遮挡聊天输入区与操作按钮
+   3. 展开态针对 4v4 与 TauriTavern 窄屏窗口做紧凑自适应和内部滚动
+   ========================================================================== */
+
+.stcf-hidden {
+    display: none !important;
+}
+
+.stcf-muted {
+    opacity: 0.72;
+    font-size: 12px;
+}
+
+/* ==================== 战斗 HUD 悬浮窗根容器 ==================== */
+.stcf-hud-root {
+    position: fixed;
+    top: 52px;
+    right: 14px;
+    z-index: 3000;
+    font-family: inherit;
+    color: var(--SmartThemeBodyColor, #e8eaed);
+    user-select: none;
+}
+
+/* 折叠态：仅显示迷你浮标 */
+.stcf-hud-root.stcf-collapsed .stcf-hud-panel {
+    display: none;
+}
+
+.stcf-hud-root:not(.stcf-collapsed) .stcf-collapsed-pill {
+    display: none;
+}
+
+.stcf-collapsed-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.22));
+    background: var(--SmartThemeBlurTintColor, rgba(26, 29, 38, 0.92));
+    backdrop-filter: blur(8px);
+    color: var(--SmartThemeBodyColor, #f1f3f5);
+    font-size: 13px;
+    cursor: grab;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+    touch-action: none;
+}
+
+.stcf-collapsed-pill:hover {
+    border-color: var(--SmartThemeQuoteColor, #7aa2f7);
+    transform: translateY(-1px);
+}
+
+.stcf-pill-badge {
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(122, 162, 247, 0.22);
+    color: #b8d0ff;
+}
+
+/* 展开态主窗口（防遮挡：限宽限高，留出下方聊天输入区空间） */
+.stcf-hud-panel {
+    width: min(680px, calc(100vw - 20px));
+    max-height: min(76vh, calc(100vh - 130px));
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2));
+    background: var(--SmartThemeBlurTintColor, rgba(22, 25, 34, 0.95));
+    backdrop-filter: blur(12px);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+    position: relative;
+}
+
+.stcf-hud-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    cursor: grab;
+    touch-action: none;
+}
+
+.stcf-header-left,
+.stcf-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.stcf-title {
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.stcf-phase-badge,
+.stcf-turn-badge {
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.stcf-phase-badge {
+    background: rgba(82, 196, 125, 0.2);
+    color: #9be8b8;
+}
+
+.stcf-icon-btn {
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    border-radius: 6px;
+    padding: 3px 7px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.stcf-icon-btn.active,
+.stcf-icon-btn:hover {
+    border-color: #7aa2f7;
+    background: rgba(122, 162, 247, 0.22);
+}
+
+/* 按钮体系 */
+.stcf-btn {
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    border-radius: 7px;
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.stcf-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+.stcf-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.stcf-btn-sm {
+    padding: 3px 9px;
+    font-size: 11px;
+}
+
+.stcf-btn-primary {
+    background: rgba(74, 144, 226, 0.32);
+    border-color: rgba(122, 162, 247, 0.65);
+}
+
+.stcf-btn-warn {
+    background: rgba(230, 126, 34, 0.32);
+    border-color: rgba(243, 156, 18, 0.65);
+}
+
+.stcf-btn-secondary {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.stcf-link-btn {
+    background: none;
+    border: none;
+    color: #9ec0ff;
+    font-size: 11px;
+    cursor: pointer;
+    padding: 0;
+}
+
+/* 阈值提示词注入实时提示条 */
+.stcf-prompt-bar {
+    background: rgba(155, 89, 182, 0.22);
+    border-bottom: 1px solid rgba(155, 89, 182, 0.45);
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.stcf-prompt-bar-summary {
+    cursor: pointer;
+    color: #e6c7ff;
+}
+
+.stcf-prompt-preview {
+    margin-top: 6px;
+    max-height: 110px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.stcf-prompt-item {
+    background: rgba(0, 0, 0, 0.25);
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+}
+
+.stcf-prompt-item-title {
+    font-weight: 700;
+    color: #f0d6ff;
+    margin-bottom: 2px;
+}
+
+.stcf-prompt-item-text {
+    white-space: pre-wrap;
+    opacity: 0.9;
+}
+
+/* HUD 可滚动主体 */
+.stcf-hud-body {
+    padding: 10px 12px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.stcf-idle-placeholder {
+    text-align: center;
+    padding: 20px 10px;
+    font-size: 13px;
+}
+
+/* 4v4 战场双栏网格 */
+.stcf-battlefield {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.stcf-side-title {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    opacity: 0.92;
+}
+
+.stcf-side-hint {
+    font-weight: 400;
+    font-size: 11px;
+    opacity: 0.65;
+}
+
+.stcf-units-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* 角色紧凑卡片 */
+.stcf-unit-card {
+    padding: 7px 9px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.stcf-unit-card:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.stcf-unit-card.stcf-selected-actor {
+    border-color: #5ea3ff;
+    box-shadow: inset 0 0 0 1px rgba(94, 163, 255, 0.45);
+    background: rgba(94, 163, 255, 0.12);
+}
+
+.stcf-unit-card.stcf-selected-target {
+    border-color: #ff6b6b;
+    box-shadow: inset 0 0 0 1px rgba(255, 107, 107, 0.45);
+}
+
+.stcf-unit-card.stcf-unit-dead {
+    opacity: 0.45;
+    filter: grayscale(0.7);
+}
+
+.stcf-unit-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 5px;
+}
+
+.stcf-unit-name-wrap,
+.stcf-unit-top-right {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+.stcf-unit-name {
+    font-weight: 700;
+    font-size: 12.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.stcf-unit-stats {
+    font-size: 11px;
+    opacity: 0.72;
+    white-space: nowrap;
+}
+
+.stcf-target-pin {
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 5px;
+    padding: 1px 4px;
+    font-size: 11px;
+    cursor: pointer;
+    line-height: 1.2;
+}
+
+.stcf-target-pin.active {
+    border-color: #ff6b6b;
+    background: rgba(255, 107, 107, 0.28);
+}
+
+.stcf-unit-tag {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.stcf-tag-ready { background: rgba(46, 204, 113, 0.24); color: #8ff0b6; }
+.stcf-tag-done  { background: rgba(255, 255, 255, 0.12); color: #bbb; }
+.stcf-tag-stun  { background: rgba(241, 196, 15, 0.26); color: #ffe17a; }
+.stcf-tag-ko    { background: rgba(231, 76, 60, 0.28); color: #ffa096; }
+
+/* 血条、蓝条、双特殊计量条 */
+.stcf-bar-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.stcf-bar-row {
+    display: grid;
+    grid-template-columns: 32px 1fr 48px;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.stcf-gauges-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.stcf-bar-mini {
+    grid-template-columns: 44px 1fr 24px;
+    gap: 4px;
+    font-size: 10px;
+}
+
+.stcf-bar-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.85;
+}
+
+.stcf-bar-track {
+    height: 7px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.38);
+    overflow: hidden;
+}
+
+.stcf-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.25s ease;
+}
+
+.stcf-bar-hp { background: linear-gradient(90deg, #e74c3c, #2ecc71); }
+.stcf-bar-mp { background: linear-gradient(90deg, #2980b9, #5dade2); }
+
+.stcf-bar-val {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.9;
+}
+
+/* Buff / Debuff 徽章 */
+.stcf-statuses-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 5px;
+}
+
+.stcf-status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10.5px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+/* GM 微调条 */
+.stcf-gm-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 5px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.14);
+    font-size: 10.5px;
+}
+
+.stcf-gm-btn {
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 10px;
+    cursor: pointer;
+}
+
+/* 技能操作区 */
+.stcf-action-box {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.24);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stcf-action-meta {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.stcf-skills-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.stcf-skill-btn {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 6px 10px;
+    border-radius: 7px;
+    border: 1px solid rgba(122, 162, 247, 0.4);
+    background: rgba(122, 162, 247, 0.14);
+    color: inherit;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.stcf-skill-btn:hover:not(:disabled) {
+    background: rgba(122, 162, 247, 0.28);
+    transform: translateY(-1px);
+}
+
+.stcf-skill-btn:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+}
+
+.stcf-skill-name {
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.stcf-skill-meta {
+    font-size: 10.5px;
+    opacity: 0.8;
+}
+
+.stcf-turn-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* 战报区 */
+.stcf-log-box {
+    margin-top: 8px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 7px 9px;
+}
+
+.stcf-log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11.5px;
+    margin-bottom: 4px;
+    opacity: 0.85;
+}
+
+.stcf-log-list {
+    max-height: 95px;
+    overflow-y: auto;
+    font-size: 11.5px;
+    line-height: 1.45;
+    user-select: text;
+}
+
+.stcf-log-item {
+    padding: 2px 0;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+/* Toast 提示 */
+.stcf-toast {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(18, 22, 32, 0.96);
+    border: 1px solid rgba(122, 162, 247, 0.65);
+    color: #fff;
+    font-size: 12px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+/* 窄屏（TauriTavern 窄窗口 / 移动端）自适应防遮挡 */
+.stcf-mobile-tabs {
+    display: none;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.stcf-mobile-tab {
+    flex: 1;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.stcf-mobile-tab.active {
+    background: rgba(122, 162, 247, 0.28);
+    border-color: #7aa2f7;
+}
+
+@media (max-width: 640px) {
+    .stcf-hud-root {
+        top: 46px;
+        right: 8px;
+    }
+
+    .stcf-hud-panel {
+        width: calc(100vw - 16px);
+        max-height: 70vh;
+    }
+
+    .stcf-mobile-tabs {
+        display: flex;
+    }
+
+    .stcf-battlefield {
+        grid-template-columns: 1fr;
+    }
+
+    .stcf-battlefield[data-view="allies"] .stcf-enemies-col {
+        display: none;
+    }
+
+    .stcf-battlefield[data-view="enemies"] .stcf-allies-col {
+        display: none;
+    }
+}
+
+/* ==================== Extensions 侧边栏设置面板样式 ==================== */
+.stcf-settings-content {
+    padding: 8px 4px;
+}
+
+.stcf-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 10px;
+}
+
+.stcf-tab-btn {
+    padding: 5px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2));
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.stcf-tab-btn.active {
+    background: rgba(122, 162, 247, 0.28);
+    border-color: #7aa2f7;
+    font-weight: 700;
+}
+
+.stcf-tab-pane {
+    display: none;
+}
+
+.stcf-tab-pane.active {
+    display: block;
+}
+
+.stcf-section-card {
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.14));
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: rgba(0, 0, 0, 0.16);
+}
+
+.stcf-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.stcf-section-title {
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+
+.stcf-section-header .stcf-section-title {
+    margin-bottom: 0;
+}
+
+.stcf-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 7px;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+
+.stcf-field-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.stcf-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.stcf-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.stcf-grid-4 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.stcf-span-2 {
+    grid-column: span 2;
+}
+
+.stcf-mini-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 11.5px;
+}
+
+.stcf-mini-field input,
+.stcf-mini-field select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 6px;
+    font-size: 12px;
+}
+
+.stcf-color-input {
+    width: 100%;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: transparent;
+    cursor: pointer;
+}
+
+.stcf-editor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stcf-item-card {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.stcf-item-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.stcf-grow {
+    flex: 1;
+    min-width: 0;
+}
+
+.stcf-icon-input {
+    width: 44px !important;
+    text-align: center;
+}
+
+.stcf-id-tag {
+    font-size: 10.5px;
+    opacity: 0.65;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.stcf-del-btn {
+    border: 1px solid rgba(231, 76, 60, 0.4);
+    background: rgba(231, 76, 60, 0.16);
+    color: inherit;
+    border-radius: 6px;
+    padding: 3px 7px;
+    cursor: pointer;
+}
+
+.stcf-inline-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.stcf-sub-label {
+    font-size: 11.5px;
+    opacity: 0.85;
+    margin-bottom: 4px;
+}
+
+.stcf-chips-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.stcf-chip-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07);
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.stcf-tip-box {
+    font-size: 11.5px;
+    line-height: 1.5;
+    padding: 7px 9px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    background: rgba(122, 162, 247, 0.12);
+    border: 1px solid rgba(122, 162, 247, 0.28);
+}
+
+.stcf-help-text {
+    font-size: 12px;
+    opacity: 0.8;
+    margin: 4px 0 8px;
+}
+
+.stcf-btn-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.stcf-sm-btn {
+    padding: 4px 9px !important;
+    font-size: 12px !important;
+}
+
+.stcf-danger-btn {
+    border-color: rgba(231, 76, 60, 0.55) !important;
+}
+
+.stcf-io-status {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #9be8b8;
+}
+
+.stcf-text-error {
+    color: #ff9c9c !important;
+}
+
+.stcf-prompt-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    font-size: 12px;
+    line-height: 1.5;
+}

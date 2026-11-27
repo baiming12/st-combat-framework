@@ -1,0 +1,304 @@
+{
+    "schemaVersion": 1,
+    "general": {
+        "enabled": true,
+        "outputMode": "fill_input",
+        "inputFillStrategy": "append",
+        "autoEndPlayerTurn": true,
+        "hudStartCollapsed": true,
+        "logHeaderTemplate": "【第 {{turn}} 回合战斗记录】",
+        "actionLogPrefix": "- "
+    },
+    "gauges": {
+        "gauge_a": {
+            "name": "状态槽A",
+            "color": "#e67e22",
+            "min": 0,
+            "max": 100
+        },
+        "gauge_b": {
+            "name": "状态槽B",
+            "color": "#9b59b6",
+            "min": 0,
+            "max": 100
+        }
+    },
+    "statuses": [
+        {
+            "id": "debuff_01",
+            "name": "持续损耗",
+            "icon": "🔥",
+            "description": "每回合结束时扣除生命值",
+            "effectType": "dot_hot",
+            "targetStat": "hp",
+            "value": -12,
+            "atkMultiplier": 1,
+            "defMultiplier": 1,
+            "duration": 3
+        },
+        {
+            "id": "debuff_02",
+            "name": "行动受限",
+            "icon": "💫",
+            "description": "无法行动，跳过本回合",
+            "effectType": "skip_turn",
+            "targetStat": "hp",
+            "value": 0,
+            "atkMultiplier": 1,
+            "defMultiplier": 1,
+            "duration": 1
+        },
+        {
+            "id": "buff_01",
+            "name": "攻击强化",
+            "icon": "⚔️",
+            "description": "攻击力提升 30%",
+            "effectType": "stat_mod",
+            "targetStat": "hp",
+            "value": 0,
+            "atkMultiplier": 1.3,
+            "defMultiplier": 1,
+            "duration": 3
+        },
+        {
+            "id": "debuff_03",
+            "name": "防御削弱",
+            "icon": "🛡️",
+            "description": "防御力降低 30%，且每回合增加状态槽A",
+            "effectType": "stat_mod",
+            "targetStat": "gauge_a",
+            "value": 10,
+            "atkMultiplier": 1,
+            "defMultiplier": 0.7,
+            "duration": 2
+        }
+    ],
+    "skills": [
+        {
+            "id": "skill_01",
+            "name": "基础攻击",
+            "description": "对单体敌方造成基础伤害",
+            "mpCost": 0,
+            "targetType": "single_enemy",
+            "effectType": "damage",
+            "formula": "max(1, atk * 1.0 - target_def * 0.4)",
+            "selfGaugeAChange": 5,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 10,
+            "targetGaugeBChange": 0,
+            "applyStatusId": "",
+            "applyStatusChance": 100,
+            "applyStatusTarget": "target"
+        },
+        {
+            "id": "skill_02",
+            "name": "重击技能",
+            "description": "消耗体力造成高额伤害，并有概率附加持续损耗状态",
+            "mpCost": 15,
+            "targetType": "single_enemy",
+            "effectType": "damage",
+            "formula": "max(1, atk * 1.6 - target_def * 0.3)",
+            "selfGaugeAChange": 10,
+            "selfGaugeBChange": 5,
+            "targetGaugeAChange": 15,
+            "targetGaugeBChange": 0,
+            "applyStatusId": "debuff_01",
+            "applyStatusChance": 80,
+            "applyStatusTarget": "target"
+        },
+        {
+            "id": "skill_03",
+            "name": "范围冲击",
+            "description": "攻击全体敌方单位，并有概率造成行动受限",
+            "mpCost": 25,
+            "targetType": "all_enemies",
+            "effectType": "damage",
+            "formula": "max(1, atk * 1.1 - target_def * 0.4)",
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 15,
+            "targetGaugeAChange": 10,
+            "targetGaugeBChange": 10,
+            "applyStatusId": "debuff_02",
+            "applyStatusChance": 50,
+            "applyStatusTarget": "target"
+        },
+        {
+            "id": "skill_04",
+            "name": "应急回复",
+            "description": "回复单体友方生命值并降低状态槽A",
+            "mpCost": 15,
+            "targetType": "single_ally",
+            "effectType": "heal",
+            "formula": "max(10, atk * 1.2 + 15)",
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": -15,
+            "targetGaugeBChange": 0,
+            "applyStatusId": "",
+            "applyStatusChance": 100,
+            "applyStatusTarget": "target"
+        },
+        {
+            "id": "skill_05",
+            "name": "战术增益",
+            "description": "为全体友方附加攻击强化状态",
+            "mpCost": 20,
+            "targetType": "all_allies",
+            "effectType": "utility",
+            "formula": "0",
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 10,
+            "targetGaugeAChange": 0,
+            "targetGaugeBChange": 0,
+            "applyStatusId": "buff_01",
+            "applyStatusChance": 100,
+            "applyStatusTarget": "target"
+        },
+        {
+            "id": "skill_enemy_01",
+            "name": "敌方普攻",
+            "description": "敌方基础攻击",
+            "mpCost": 0,
+            "targetType": "single_enemy",
+            "effectType": "damage",
+            "formula": "max(1, atk * 1.0 - target_def * 0.4)",
+            "selfGaugeAChange": 0,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 12,
+            "targetGaugeBChange": 0,
+            "applyStatusId": "",
+            "applyStatusChance": 100,
+            "applyStatusTarget": "target"
+        },
+        {
+            "id": "skill_enemy_02",
+            "name": "敌方强袭",
+            "description": "敌方消耗体力发动强袭并附加防御削弱",
+            "mpCost": 15,
+            "targetType": "single_enemy",
+            "effectType": "damage",
+            "formula": "max(1, atk * 1.4 - target_def * 0.3)",
+            "selfGaugeAChange": 10,
+            "selfGaugeBChange": 0,
+            "targetGaugeAChange": 20,
+            "targetGaugeBChange": 10,
+            "applyStatusId": "debuff_03",
+            "applyStatusChance": 70,
+            "applyStatusTarget": "target"
+        }
+    ],
+    "allies": [
+        {
+            "id": "ally_01",
+            "enabled": true,
+            "name": "我方角色A",
+            "maxHp": 120,
+            "maxMp": 60,
+            "atk": 24,
+            "def": 10,
+            "initialGaugeA": 0,
+            "initialGaugeB": 0,
+            "skillIds": [
+                "skill_01",
+                "skill_02",
+                "skill_03",
+                "skill_04",
+                "skill_05"
+            ]
+        },
+        {
+            "id": "ally_02",
+            "enabled": false,
+            "name": "我方角色B",
+            "maxHp": 100,
+            "maxMp": 80,
+            "atk": 20,
+            "def": 8,
+            "initialGaugeA": 0,
+            "initialGaugeB": 0,
+            "skillIds": [
+                "skill_01",
+                "skill_04",
+                "skill_05"
+            ]
+        }
+    ],
+    "enemies": [
+        {
+            "id": "enemy_01",
+            "enabled": true,
+            "name": "敌方目标A",
+            "maxHp": 150,
+            "maxMp": 60,
+            "atk": 22,
+            "def": 8,
+            "initialGaugeA": 0,
+            "initialGaugeB": 0,
+            "skillIds": [
+                "skill_enemy_01",
+                "skill_enemy_02"
+            ]
+        },
+        {
+            "id": "enemy_02",
+            "enabled": false,
+            "name": "敌方目标B",
+            "maxHp": 110,
+            "maxMp": 50,
+            "atk": 18,
+            "def": 6,
+            "initialGaugeA": 0,
+            "initialGaugeB": 0,
+            "skillIds": [
+                "skill_enemy_01"
+            ]
+        }
+    ],
+    "triggerRules": [
+        {
+            "id": "rule_01",
+            "name": "我方角色战败",
+            "enabled": true,
+            "scope": "all_allies",
+            "unitId": "ally_01",
+            "conditionType": "hp",
+            "operator": "<=",
+            "threshold": 0,
+            "statusId": "",
+            "position": "in_chat",
+            "depth": 1,
+            "role": "system",
+            "promptText": "[系统战斗事件] 我方全员（{{unit_name}}）生命值已归零，失去战斗能力。请在接下来的回复中描写战败后的剧情发展。"
+        },
+        {
+            "id": "rule_02",
+            "name": "状态槽A满值触发",
+            "enabled": true,
+            "scope": "any_ally",
+            "unitId": "ally_01",
+            "conditionType": "gauge_a",
+            "operator": ">=",
+            "threshold": 100,
+            "statusId": "",
+            "position": "in_chat",
+            "depth": 1,
+            "role": "system",
+            "promptText": "[系统战斗事件] {{unit_name}} 的「{{gauge_a_name}}」已达到满值（{{gauge_a}}/100）！请在接下来的剧情中重点描写该特殊状态爆发带来的影响。"
+        },
+        {
+            "id": "rule_03",
+            "name": "处于行动受限状态",
+            "enabled": false,
+            "scope": "any_ally",
+            "unitId": "ally_01",
+            "conditionType": "has_status",
+            "operator": "==",
+            "threshold": 0,
+            "statusId": "debuff_02",
+            "position": "in_chat",
+            "depth": 1,
+            "role": "system",
+            "promptText": "[系统战斗事件] {{unit_name}} 当前处于异常控制状态，暂时无法正常行动，请结合战局描写其陷入被动的场景。"
+        }
+    ]
+}

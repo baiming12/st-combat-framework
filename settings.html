@@ -1,0 +1,163 @@
+<!-- SillyTavern Extensions 侧边栏可视化配置面板（零代码实时编辑） -->
+<div id="stcf-settings-container" class="stcf-settings-container">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>⚔️ TRPG 通用回合制战斗框架</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content stcf-settings-content">
+            <!-- 顶部分类标签页 -->
+            <div class="stcf-tabs" role="tablist">
+                <button type="button" class="stcf-tab-btn active" data-tab="general">基础与导入导出</button>
+                <button type="button" class="stcf-tab-btn" data-tab="units">参战角色(4v4)</button>
+                <button type="button" class="stcf-tab-btn" data-tab="skills">技能库</button>
+                <button type="button" class="stcf-tab-btn" data-tab="statuses">状态/Buff</button>
+                <button type="button" class="stcf-tab-btn" data-tab="rules">阈值提示词</button>
+            </div>
+
+            <!-- ==================== 1. 基础设置与导入导出 ==================== -->
+            <div class="stcf-tab-pane active" data-pane="general">
+                <div class="stcf-section-card">
+                    <div class="stcf-section-title">基础开关与战报输出</div>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-enabled">
+                        <span>启用战斗插件（显示战斗浮标并启用提示词自动注入）</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-hud-collapsed">
+                        <span>打开页面时 HUD 默认折叠为迷你浮标</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-auto-end-turn">
+                        <span>我方全员行动完后自动结算敌方回合</span>
+                    </label>
+
+                    <div class="stcf-field-row">
+                        <label for="stcf-set-output-mode">释放技能后的战报自动输出方式（绝不自动发送）：</label>
+                        <select id="stcf-set-output-mode" class="text_pole">
+                            <option value="fill_input">自动填入聊天输入框（不发送，等你补充剧情再发）</option>
+                            <option value="clipboard">自动复制到剪贴板</option>
+                            <option value="manual">仅在面板显示，手动点按钮复制/填入</option>
+                        </select>
+                    </div>
+
+                    <div class="stcf-field-row">
+                        <label for="stcf-set-fill-strategy">填入聊天输入框时：</label>
+                        <select id="stcf-set-fill-strategy" class="text_pole">
+                            <option value="append">追加到输入框末尾（保留你已写好的内容）</option>
+                            <option value="replace">替换输入框当前内容</option>
+                        </select>
+                    </div>
+
+                    <div class="stcf-field-row">
+                        <label for="stcf-set-log-header">战报标题模板（可用 <code>{{turn}}</code> 表示回合数）：</label>
+                        <input type="text" id="stcf-set-log-header" class="text_pole" placeholder="【第 {{turn}} 回合战斗记录】">
+                    </div>
+                </div>
+
+                <div class="stcf-section-card">
+                    <div class="stcf-section-title">自定义特殊计量条（范围 0-100）</div>
+                    <div class="stcf-grid-2">
+                        <div class="stcf-field-row">
+                            <label for="stcf-set-gauge-a-name">状态槽 A 显示名称：</label>
+                            <input type="text" id="stcf-set-gauge-a-name" class="text_pole" placeholder="状态槽A">
+                        </div>
+                        <div class="stcf-field-row">
+                            <label for="stcf-set-gauge-a-color">状态槽 A 进度条颜色：</label>
+                            <input type="color" id="stcf-set-gauge-a-color" class="stcf-color-input">
+                        </div>
+                        <div class="stcf-field-row">
+                            <label for="stcf-set-gauge-b-name">状态槽 B 显示名称：</label>
+                            <input type="text" id="stcf-set-gauge-b-name" class="text_pole" placeholder="状态槽B">
+                        </div>
+                        <div class="stcf-field-row">
+                            <label for="stcf-set-gauge-b-color">状态槽 B 进度条颜色：</label>
+                            <input type="color" id="stcf-set-gauge-b-color" class="stcf-color-input">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stcf-section-card">
+                    <div class="stcf-section-title">配置备份与批量编辑（JSON 导入/导出）</div>
+                    <p class="stcf-help-text">你可以导出为 JSON 文件备份，或者用电脑记事本批量改完技能/提示词后再导入回来。</p>
+                    <div class="stcf-btn-group">
+                        <button type="button" id="stcf-btn-export-json" class="menu_button">📤 一键导出 JSON</button>
+                        <button type="button" id="stcf-btn-import-json" class="menu_button">📥 导入 JSON 配置</button>
+                        <button type="button" id="stcf-btn-reset-default" class="menu_button stcf-danger-btn">🔄 恢复出厂默认</button>
+                        <input type="file" id="stcf-file-import-json" accept=".json,application/json" class="stcf-hidden">
+                    </div>
+                    <div id="stcf-io-status" class="stcf-io-status"></div>
+                </div>
+            </div>
+
+            <!-- ==================== 2. 参战角色（最多 4v4） ==================== -->
+            <div class="stcf-tab-pane" data-pane="units">
+                <div class="stcf-section-card">
+                    <div class="stcf-section-header">
+                        <span class="stcf-section-title">我方角色（最多 4 人，勾选“出战”即参与战斗）</span>
+                        <button type="button" id="stcf-btn-add-ally" class="menu_button stcf-sm-btn">➕ 添加我方角色</button>
+                    </div>
+                    <div id="stcf-allies-editor" class="stcf-editor-list"></div>
+                </div>
+
+                <div class="stcf-section-card">
+                    <div class="stcf-section-header">
+                        <span class="stcf-section-title">敌方单位（最多 4 人，勾选“出战”即参与战斗）</span>
+                        <button type="button" id="stcf-btn-add-enemy" class="menu_button stcf-sm-btn">➕ 添加敌方单位</button>
+                    </div>
+                    <div id="stcf-enemies-editor" class="stcf-editor-list"></div>
+                </div>
+                <p class="stcf-help-text">提示：修改角色初始属性后，点击战斗 HUD 上的「重置战斗」即可按最新配置重新开战。</p>
+            </div>
+
+            <!-- ==================== 3. 技能库编辑器 ==================== -->
+            <div class="stcf-tab-pane" data-pane="skills">
+                <div class="stcf-section-card">
+                    <div class="stcf-section-header">
+                        <span class="stcf-section-title">技能列表（实时保存）</span>
+                        <button type="button" id="stcf-btn-add-skill" class="menu_button stcf-sm-btn">➕ 新增技能</button>
+                    </div>
+                    <div class="stcf-tip-box">
+                        <strong>公式可用变量：</strong>
+                        <code>atk</code>(自身攻击)、<code>def</code>(自身防御)、<code>hp</code>、<code>max_hp</code>、<code>gauge_a</code>、<code>gauge_b</code>、
+                        <code>target_def</code>(目标防御)、<code>target_hp</code>、<code>max(a,b)</code>、<code>min(a,b)</code>、<code>rand(min,max)</code>
+                    </div>
+                    <div id="stcf-skills-editor" class="stcf-editor-list"></div>
+                </div>
+            </div>
+
+            <!-- ==================== 4. 状态 / Buff 编辑器 ==================== -->
+            <div class="stcf-tab-pane" data-pane="statuses">
+                <div class="stcf-section-card">
+                    <div class="stcf-section-header">
+                        <span class="stcf-section-title">通用 Buff / Debuff 模板库</span>
+                        <button type="button" id="stcf-btn-add-status" class="menu_button stcf-sm-btn">➕ 新增状态</button>
+                    </div>
+                    <div class="stcf-tip-box">
+                        所有状态都会自动按<strong>持续回合数倒计时，归零自动移除</strong>。你可以自由组合持续增减血量/特殊槽、跳过回合、攻防倍率效果。
+                    </div>
+                    <div id="stcf-statuses-editor" class="stcf-editor-list"></div>
+                </div>
+            </div>
+
+            <!-- ==================== 5. 阈值触发与 Prompt 注入编辑器 ==================== -->
+            <div class="stcf-tab-pane" data-pane="rules">
+                <div class="stcf-section-card">
+                    <div class="stcf-section-header">
+                        <span class="stcf-section-title">阈值触发与剧情 Prompt 自动注入规则</span>
+                        <button type="button" id="stcf-btn-add-rule" class="menu_button stcf-sm-btn">➕ 新增触发规则</button>
+                    </div>
+                    <div class="stcf-tip-box">
+                        <strong>提示词可用占位符：</strong>
+                        <code>{{unit_name}}</code>(触发角色名)、<code>{{hp}}</code>、<code>{{max_hp}}</code>、<code>{{gauge_a}}</code>、<code>{{gauge_b}}</code>、<code>{{gauge_a_name}}</code>、<code>{{gauge_b_name}}</code>、<code>{{turn}}</code>。
+                        满足条件时自动注入给 AI，条件解除后自动撤回。
+                    </div>
+                    <div id="stcf-rules-editor" class="stcf-editor-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
