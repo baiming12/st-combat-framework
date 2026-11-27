@@ -1,7 +1,9 @@
 {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "general": {
         "enabled": true,
+        "usePerCharacterConfig": true,
+        "listenAiEvents": true,
         "outputMode": "fill_input",
         "inputFillStrategy": "append",
         "autoEndPlayerTurn": true,
@@ -70,6 +72,30 @@
             "value": 10,
             "atkMultiplier": 1,
             "defMultiplier": 0.7,
+            "duration": 2
+        },
+        {
+            "id": "buff_02",
+            "name": "警戒守护",
+            "icon": "🧢",
+            "description": "防御力提升 20%，每回合回复 5 点 MP",
+            "effectType": "stat_mod",
+            "targetStat": "mp",
+            "value": 5,
+            "atkMultiplier": 1,
+            "defMultiplier": 1.2,
+            "duration": 3
+        },
+        {
+            "id": "buff_03",
+            "name": "过载爆发",
+            "icon": "⚡",
+            "description": "状态槽满值触发：攻击力提升 50%，防御力降低 20%",
+            "effectType": "stat_mod",
+            "targetStat": "hp",
+            "value": 0,
+            "atkMultiplier": 1.5,
+            "defMultiplier": 0.8,
             "duration": 2
         }
     ],
@@ -187,6 +213,91 @@
             "applyStatusTarget": "target"
         }
     ],
+    "equipments": [
+        {
+            "id": "equip_01",
+            "name": "制式短刃",
+            "slot": "weapon",
+            "description": "提升基础攻击力的常规武器",
+            "bonusHp": 0,
+            "bonusMp": 0,
+            "bonusAtk": 6,
+            "bonusDef": 0,
+            "grantSkillId": "",
+            "passiveStatusId": ""
+        },
+        {
+            "id": "equip_02",
+            "name": "战术护帽",
+            "slot": "head",
+            "description": "提升防御并附带常驻「警戒守护」增益状态",
+            "bonusHp": 10,
+            "bonusMp": 0,
+            "bonusAtk": 0,
+            "bonusDef": 4,
+            "grantSkillId": "",
+            "passiveStatusId": "buff_02"
+        },
+        {
+            "id": "equip_03",
+            "name": "战术增幅饰章",
+            "slot": "accessory",
+            "description": "增加 MP 上限并附带可使用「战术增益」技能",
+            "bonusHp": 0,
+            "bonusMp": 20,
+            "bonusAtk": 2,
+            "bonusDef": 1,
+            "grantSkillId": "skill_05",
+            "passiveStatusId": ""
+        }
+    ],
+    "items": [
+        {
+            "id": "item_01",
+            "name": "恢复药剂",
+            "icon": "🧪",
+            "description": "回复单体友方 45 点生命值",
+            "quantity": 3,
+            "targetType": "single_ally",
+            "effectType": "heal",
+            "formula": "45",
+            "targetGaugeAChange": -10,
+            "targetGaugeBChange": 0,
+            "applyStatusId": "",
+            "applyStatusChance": 100,
+            "consumesTurn": true
+        },
+        {
+            "id": "item_02",
+            "name": "状态净化剂",
+            "icon": "💧",
+            "description": "清除单体友方身上的临时异常状态并降低状态槽",
+            "quantity": 2,
+            "targetType": "single_ally",
+            "effectType": "cleanse",
+            "formula": "0",
+            "targetGaugeAChange": -25,
+            "targetGaugeBChange": -25,
+            "applyStatusId": "",
+            "applyStatusChance": 100,
+            "consumesTurn": false
+        },
+        {
+            "id": "item_03",
+            "name": "战术爆弹",
+            "icon": "💣",
+            "description": "对全体敌方造成 30 点固定伤害",
+            "quantity": 2,
+            "targetType": "all_enemies",
+            "effectType": "damage",
+            "formula": "30",
+            "targetGaugeAChange": 15,
+            "targetGaugeBChange": 0,
+            "applyStatusId": "",
+            "applyStatusChance": 100,
+            "consumesTurn": true
+        }
+    ],
     "allies": [
         {
             "id": "ally_01",
@@ -202,8 +313,10 @@
                 "skill_01",
                 "skill_02",
                 "skill_03",
-                "skill_04",
-                "skill_05"
+                "skill_04"
+            ],
+            "equipmentIds": [
+                "equip_01"
             ]
         },
         {
@@ -220,7 +333,8 @@
                 "skill_01",
                 "skill_04",
                 "skill_05"
-            ]
+            ],
+            "equipmentIds": []
         }
     ],
     "enemies": [
@@ -237,7 +351,8 @@
             "skillIds": [
                 "skill_enemy_01",
                 "skill_enemy_02"
-            ]
+            ],
+            "equipmentIds": []
         },
         {
             "id": "enemy_02",
@@ -251,7 +366,8 @@
             "initialGaugeB": 0,
             "skillIds": [
                 "skill_enemy_01"
-            ]
+            ],
+            "equipmentIds": []
         }
     ],
     "triggerRules": [
@@ -265,6 +381,9 @@
             "operator": "<=",
             "threshold": 0,
             "statusId": "",
+            "grantStatusId": "",
+            "grantStatusMode": "while_condition",
+            "resetGaugeOnTrigger": "",
             "position": "in_chat",
             "depth": 1,
             "role": "system",
@@ -272,7 +391,7 @@
         },
         {
             "id": "rule_02",
-            "name": "状态槽A满值触发",
+            "name": "状态槽A满值触发（含自动Buff）",
             "enabled": true,
             "scope": "any_ally",
             "unitId": "ally_01",
@@ -280,10 +399,13 @@
             "operator": ">=",
             "threshold": 100,
             "statusId": "",
+            "grantStatusId": "buff_03",
+            "grantStatusMode": "while_condition",
+            "resetGaugeOnTrigger": "",
             "position": "in_chat",
             "depth": 1,
             "role": "system",
-            "promptText": "[系统战斗事件] {{unit_name}} 的「{{gauge_a_name}}」已达到满值（{{gauge_a}}/100）！请在接下来的剧情中重点描写该特殊状态爆发带来的影响。"
+            "promptText": "[系统战斗事件] {{unit_name}} 的「{{gauge_a_name}}」已达到满值（{{gauge_a}}/100）并进入爆发状态！请在接下来的剧情中重点描写该特殊状态爆发带来的影响。"
         },
         {
             "id": "rule_03",
@@ -295,6 +417,9 @@
             "operator": "==",
             "threshold": 0,
             "statusId": "debuff_02",
+            "grantStatusId": "",
+            "grantStatusMode": "while_condition",
+            "resetGaugeOnTrigger": "",
             "position": "in_chat",
             "depth": 1,
             "role": "system",

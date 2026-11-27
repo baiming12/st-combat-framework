@@ -1,10 +1,10 @@
 /**
- * 配置管理模块 (src/config.js)
+ * 配置管理模块 (src/config.js) - v1.1
  * 职责：
- * 1. 从 default_config.json 读取初始配置（完全不依赖 Node.js 后端）
- * 2. 通过 SillyTavern 原生 extension_settings 持久化保存用户的零代码修改
- * 3. 按当前聊天记录隔离保存战斗进度（chatMetadata），切换对话不串数据
- * 4. 提供一键导出 JSON、导入 JSON、恢复默认配置功能，并做数据兜底校验
+ * 1. 从 default_config.json 读取初始配置（纯前端，零 Node.js 依赖）
+ * 2. 支持「按角色卡独立保存配置方案（Profile）」与全局方案自由切换
+ * 3. 严格按当前聊天/角色卡 ID 隔离战斗进度，切换角色卡绝不串台
+ * 4. 支持一键导出 JSON、上传/粘贴 JSON 导入，并支持「完整替换」与「增量合并」（完美配合写卡助手！）
  */
 
 export const EXTENSION_KEY = 'st_combat_framework';
@@ -48,8 +48,39 @@ export function clamp(value, min, max) {
 }
 
 /**
+ * 获取当前角色卡（或群聊）的方案隔离键，用于“按角色卡独立保存配置”
+ * @param {object} ctx
+ * @returns {{ key: string, label: string }}
+ */
+export function getCurrentProfileInfo(ctx = getSTContext()) {
+    if (ctx.groupId) {
+        return { key: `group:${ctx.groupId}`, label: `群聊专属 (${ctx.groupId})` };
+    }
+    if (ctx.characterId !== undefined && ctx.characterId !== null && ctx.characterId !== '') {
+        const charObj = Array.isArray(ctx.characters) ? ctx.characters[Number(ctx.characterId)] : null;
+        const avatarKey = charObj?.avatar ? `char_avatar:${charObj.avatar}` : `char_id:${ctx.characterId}`;
+        const charName = charObj?.name || ctx.name2 || `角色#${ctx.characterId}`;
+        return { key: avatarKey, label: `角色卡「${charName}」专属方案` };
+    }
+    return { key: '', label: '全局默认方案' };
+}
+
+/**
+ * 获取当前聊天/角色卡的战斗进度唯一隔离键
+ * @param {object} ctx
+ * @returns {string}
+ */
+function getCurrentChatScopeKey(ctx) {
+    if (ctx.chatId) return `chat:${ctx.chatId}`;
+    if (ctx.groupId) return `group:${ctx.groupId}`;
+    if (ctx.characterId !== undefined && ctx.characterId !== null && ctx.characterId !== '') {
+        return `char:${ctx.characterId}`;
+    }
+    return '';
+}
+
+/**
  * 加载默认配置文件 default_config.json
- * 使用 import.meta.url 自动定位相对路径，兼容任意安装目录与 TauriTavern
  * @returns {Promise<object>}
  */
 export async function loadDefaultConfig() {
@@ -66,11 +97,7 @@ export async function loadDefaultConfig() {
 }
 
 /**
- * 对单个角色配置进行字段兜底与规范化，防止手工改 JSON 时缺字段导致报错
- * @param {object} rawUnit
- * @param {'ally'|'enemy'} side
- * @param {number} index
- * @returns {object}
+ * 规范化单个角色模板
  */
 function normalizeUnitTemplate(rawUnit, side, index) {
     const prefix = side === 'ally' ? 'ally' : 'enemy';
@@ -88,11 +115,58 @@ function normalizeUnitTemplate(rawUnit, side, index) {
         initialGaugeA: clamp(rawUnit?.initialGaugeA ?? 0, 0, 100),
         initialGaugeB: clamp(rawUnit?.initialGaugeB ?? 0, 0, 100),
         skillIds: Array.isArray(rawUnit?.skillIds) ? rawUnit.skillIds.map(String) : [],
+        equipmentIds: Array.isArray(rawUnit?.equipmentIds) ? rawUnit.equipmentIds.map(String) : [],
     };
 }
 
 /**
- * 对完整配置进行结构合并与安全兜底
+ * 规范化单件装备
+ */
+export function normalizeEquipment(rawEquip, idx = 0) {
+    const defaultId = `equip_${String(idx + 1).padStart(2, '0')}`;
+    const validSlots = ['weapon', 'head', 'body', 'accessory'];
+    return {
+        id: String(rawEquip?.id || defaultId).trim() || defaultId,
+        name: String(rawEquip?.name ?? defaultId).trim() || defaultId,
+        slot: validSlots.includes(rawEquip?.slot) ? rawEquip.slot : 'accessory',
+        description: String(rawEquip?.description || ''),
+        bonusHp: Math.round(Number(rawEquip?.bonusHp ?? 0) || 0),
+        bonusMp: Math.round(Number(rawEquip?.bonusMp ?? 0) || 0),
+        bonusAtk: Math.round(Number(rawEquip?.bonusAtk ?? 0) || 0),
+        bonusDef: Math.round(Number(rawEquip?.bonusDef ?? 0) || 0),
+        grantSkillId: String(rawEquip?.grantSkillId || ''),
+        passiveStatusId: String(rawEquip?.passiveStatusId || ''),
+    };
+}
+
+/**
+ * 规范化单个道具
+ */
+export function normalizeItem(rawItem, idx = 0) {
+    const defaultId = `item_${String(idx + 1).padStart(2, '0')}`;
+    return {
+        id: String(rawItem?.id || defaultId).trim() || defaultId,
+        name: String(rawItem?.name ?? defaultId).trim() || defaultId,
+        icon: String(rawItem?.icon || '🎒'),
+        description: String(rawItem?.description || ''),
+        quantity: Math.max(0, Math.round(Number(rawItem?.quantity ?? 1) || 0)),
+        targetType: ['single_enemy', 'all_enemies', 'self', 'single_ally', 'all_allies'].includes(rawItem?.targetType)
+            ? rawItem.targetType
+            : 'single_ally',
+        effectType: ['heal', 'mp_restore', 'damage', 'cleanse', 'utility'].includes(rawItem?.effectType)
+            ? rawItem.effectType
+            : 'heal',
+        formula: String(rawItem?.formula ?? '30'),
+        targetGaugeAChange: Number.isFinite(Number(rawItem?.targetGaugeAChange)) ? Number(rawItem.targetGaugeAChange) : 0,
+        targetGaugeBChange: Number.isFinite(Number(rawItem?.targetGaugeBChange)) ? Number(rawItem.targetGaugeBChange) : 0,
+        applyStatusId: String(rawItem?.applyStatusId || ''),
+        applyStatusChance: clamp(rawItem?.applyStatusChance ?? 100, 0, 100),
+        consumesTurn: rawItem?.consumesTurn !== false,
+    };
+}
+
+/**
+ * 对完整配置进行结构合并与安全兜底（完全兼容 v1 旧配置）
  * @param {object} rawConfig
  * @param {object} defaults
  * @returns {object}
@@ -101,12 +175,11 @@ export function normalizeConfig(rawConfig, defaults) {
     const base = deepClone(defaults);
     const src = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
 
-    // 1. 全局设置合并
+    // 1. 全局设置
     const general = {
         ...base.general,
         ...(src.general && typeof src.general === 'object' ? src.general : {}),
     };
-    // 严格确保输出模式不会自动发送，仅允许 fill_input / clipboard / manual
     if (!['fill_input', 'clipboard', 'manual'].includes(general.outputMode)) {
         general.outputMode = 'fill_input';
     }
@@ -114,26 +187,18 @@ export function normalizeConfig(rawConfig, defaults) {
         general.inputFillStrategy = 'append';
     }
     general.enabled = general.enabled !== false;
+    general.usePerCharacterConfig = general.usePerCharacterConfig !== false;
+    general.listenAiEvents = general.listenAiEvents !== false;
     general.autoEndPlayerTurn = general.autoEndPlayerTurn !== false;
     general.hudStartCollapsed = general.hudStartCollapsed !== false;
 
     // 2. 特殊计量条定义（固定 2 个：gauge_a、gauge_b，范围 0-100）
     const gauges = {
-        gauge_a: {
-            ...base.gauges.gauge_a,
-            ...(src.gauges?.gauge_a || {}),
-            min: 0,
-            max: 100,
-        },
-        gauge_b: {
-            ...base.gauges.gauge_b,
-            ...(src.gauges?.gauge_b || {}),
-            min: 0,
-            max: 100,
-        },
+        gauge_a: { ...base.gauges.gauge_a, ...(src.gauges?.gauge_a || {}), min: 0, max: 100 },
+        gauge_b: { ...base.gauges.gauge_b, ...(src.gauges?.gauge_b || {}), min: 0, max: 100 },
     };
 
-    // 3. 状态（Buff/Debuff）列表
+    // 3. 状态（Buff/Debuff）库
     const rawStatuses = Array.isArray(src.statuses) ? src.statuses : base.statuses;
     const statuses = rawStatuses.map((st, idx) => ({
         id: String(st?.id || `status_${idx + 1}`).trim() || `status_${idx + 1}`,
@@ -148,7 +213,7 @@ export function normalizeConfig(rawConfig, defaults) {
         duration: Math.max(1, Math.round(Number(st?.duration ?? 1) || 1)),
     }));
 
-    // 4. 技能列表
+    // 4. 技能库
     const rawSkills = Array.isArray(src.skills) ? src.skills : base.skills;
     const skills = rawSkills.map((sk, idx) => ({
         id: String(sk?.id || `skill_${idx + 1}`).trim() || `skill_${idx + 1}`,
@@ -171,13 +236,20 @@ export function normalizeConfig(rawConfig, defaults) {
         applyStatusTarget: sk?.applyStatusTarget === 'self' ? 'self' : 'target',
     }));
 
-    // 5. 我方与敌方单位（每方最多 4 人，支持 1v1 ~ 4v4）
+    // 5. 装备库 & 道具库（v1.1 新增）
+    const rawEquips = Array.isArray(src.equipments) ? src.equipments : (base.equipments || []);
+    const equipments = rawEquips.map((eq, idx) => normalizeEquipment(eq, idx));
+
+    const rawItems = Array.isArray(src.items) ? src.items : (base.items || []);
+    const items = rawItems.map((it, idx) => normalizeItem(it, idx));
+
+    // 6. 我方与敌方单位（每方最多 4 人）
     const rawAllies = Array.isArray(src.allies) && src.allies.length > 0 ? src.allies : base.allies;
     const rawEnemies = Array.isArray(src.enemies) && src.enemies.length > 0 ? src.enemies : base.enemies;
     const allies = rawAllies.slice(0, MAX_UNITS_PER_SIDE).map((u, idx) => normalizeUnitTemplate(u, 'ally', idx));
     const enemies = rawEnemies.slice(0, MAX_UNITS_PER_SIDE).map((u, idx) => normalizeUnitTemplate(u, 'enemy', idx));
 
-    // 6. 阈值触发与 Prompt 注入规则
+    // 7. 阈值触发规则（支持 Prompt 注入 + 状态满/空自动挂载 Buff）
     const rawRules = Array.isArray(src.triggerRules) ? src.triggerRules : base.triggerRules;
     const triggerRules = rawRules.map((r, idx) => ({
         id: String(r?.id || `rule_${idx + 1}`).trim() || `rule_${idx + 1}`,
@@ -193,6 +265,9 @@ export function normalizeConfig(rawConfig, defaults) {
         operator: ['<=', '<', '>=', '>', '=='].includes(r?.operator) ? r.operator : '<=',
         threshold: Number.isFinite(Number(r?.threshold)) ? Number(r.threshold) : 0,
         statusId: String(r?.statusId || ''),
+        grantStatusId: String(r?.grantStatusId || ''),
+        grantStatusMode: r?.grantStatusMode === 'on_enter' ? 'on_enter' : 'while_condition',
+        resetGaugeOnTrigger: ['gauge_a', 'gauge_b'].includes(r?.resetGaugeOnTrigger) ? r.resetGaugeOnTrigger : '',
         position: ['in_chat', 'in_prompt', 'before_prompt'].includes(r?.position) ? r.position : 'in_chat',
         depth: Math.max(0, Math.round(Number(r?.depth ?? 1) || 0)),
         role: ['system', 'user', 'assistant'].includes(r?.role) ? r.role : 'system',
@@ -200,11 +275,13 @@ export function normalizeConfig(rawConfig, defaults) {
     }));
 
     return {
-        schemaVersion: base.schemaVersion || 1,
+        schemaVersion: base.schemaVersion || 2,
         general,
         gauges,
         statuses,
         skills,
+        equipments,
+        items,
         allies,
         enemies,
         triggerRules,
@@ -212,7 +289,7 @@ export function normalizeConfig(rawConfig, defaults) {
 }
 
 /**
- * 读取当前持久化配置（优先从 SillyTavern extension_settings 读取）
+ * 读取当前生效配置（支持按角色卡自动隔离方案）
  * @returns {Promise<object>}
  */
 export async function loadConfig() {
@@ -220,16 +297,32 @@ export async function loadConfig() {
     const ctx = getSTContext();
 
     if (ctx.extensionSettings) {
-        const stored = ctx.extensionSettings[EXTENSION_KEY]?.config;
-        const normalized = normalizeConfig(stored, defaults);
         if (!ctx.extensionSettings[EXTENSION_KEY]) {
             ctx.extensionSettings[EXTENSION_KEY] = {};
         }
-        ctx.extensionSettings[EXTENSION_KEY].config = normalized;
-        return normalized;
+        const rootStore = ctx.extensionSettings[EXTENSION_KEY];
+        const globalCfg = normalizeConfig(rootStore.config, defaults);
+        rootStore.config = globalCfg;
+
+        const usePerChar = rootStore.usePerCharacterConfig !== undefined
+            ? Boolean(rootStore.usePerCharacterConfig)
+            : globalCfg.general.usePerCharacterConfig !== false;
+
+        const profileInfo = getCurrentProfileInfo(ctx);
+        if (usePerChar && profileInfo.key) {
+            if (!rootStore.profilesByChar) {
+                rootStore.profilesByChar = {};
+            }
+            const storedProfile = rootStore.profilesByChar[profileInfo.key];
+            const profileCfg = normalizeConfig(storedProfile || globalCfg, defaults);
+            profileCfg.general.usePerCharacterConfig = true;
+            return profileCfg;
+        }
+
+        globalCfg.general.usePerCharacterConfig = usePerChar;
+        return deepClone(globalCfg);
     }
 
-    // 兜底：当在独立页面调试时使用 localStorage
     try {
         const raw = localStorage.getItem(`${EXTENSION_KEY}_config`);
         return normalizeConfig(raw ? JSON.parse(raw) : null, defaults);
@@ -239,7 +332,7 @@ export async function loadConfig() {
 }
 
 /**
- * 持久化保存配置到 SillyTavern extension_settings
+ * 持久化保存当前配置（自动保存到当前角色卡专属方案或全局方案）
  * @param {object} config
  */
 export function saveConfig(config) {
@@ -248,7 +341,20 @@ export function saveConfig(config) {
         if (!ctx.extensionSettings[EXTENSION_KEY]) {
             ctx.extensionSettings[EXTENSION_KEY] = {};
         }
-        ctx.extensionSettings[EXTENSION_KEY].config = config;
+        const rootStore = ctx.extensionSettings[EXTENSION_KEY];
+        const usePerChar = config?.general?.usePerCharacterConfig !== false;
+        rootStore.usePerCharacterConfig = usePerChar;
+
+        const profileInfo = getCurrentProfileInfo(ctx);
+        if (usePerChar && profileInfo.key) {
+            if (!rootStore.profilesByChar) {
+                rootStore.profilesByChar = {};
+            }
+            rootStore.profilesByChar[profileInfo.key] = deepClone(config);
+        } else {
+            rootStore.config = deepClone(config);
+        }
+
         if (typeof ctx.saveSettingsDebounced === 'function') {
             ctx.saveSettingsDebounced();
         }
@@ -257,6 +363,23 @@ export function saveConfig(config) {
             localStorage.setItem(`${EXTENSION_KEY}_config`, JSON.stringify(config));
         } catch (err) {
             console.warn('[CombatFramework] localStorage 保存配置失败:', err);
+        }
+    }
+}
+
+/**
+ * 将当前方案另存为全局模板（供新角色卡首次进入时继承）
+ * @param {object} config
+ */
+export function saveAsGlobalTemplate(config) {
+    const ctx = getSTContext();
+    if (ctx.extensionSettings) {
+        if (!ctx.extensionSettings[EXTENSION_KEY]) {
+            ctx.extensionSettings[EXTENSION_KEY] = {};
+        }
+        ctx.extensionSettings[EXTENSION_KEY].config = deepClone(config);
+        if (typeof ctx.saveSettingsDebounced === 'function') {
+            ctx.saveSettingsDebounced();
         }
     }
 }
@@ -272,7 +395,7 @@ export async function resetConfigToDefaults() {
 }
 
 /**
- * 将当前配置导出为 JSON 文件下载（纯前端 Blob 下载，无需后端）
+ * 导出当前配置为 JSON 文件（纯前端 Blob 下载）
  * @param {object} config
  */
 export function exportConfigAsJson(config) {
@@ -290,38 +413,113 @@ export function exportConfigAsJson(config) {
 }
 
 /**
- * 从用户上传的 JSON 文本解析、校验并保存配置
- * @param {string} jsonText
- * @returns {Promise<object>}
+ * 从可能带 Markdown 代码块（```json ... ```）的文本中提取纯 JSON
+ * 方便用户直接复制“写卡助手”的回复粘贴导入
+ * @param {string} rawText
+ * @returns {string}
  */
-export async function importConfigFromJsonText(jsonText) {
+export function stripMarkdownJsonFence(rawText) {
+    const trimmed = String(rawText || '').trim();
+    const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenceMatch && fenceMatch[1]) {
+        return fenceMatch[1].trim();
+    }
+    return trimmed;
+}
+
+/**
+ * 按 ID 增量合并数组（同 ID 更新，新 ID 追加）
+ * @param {Array<object>} existingArr
+ * @param {Array<object>} incomingArr
+ * @param {number} [maxLen]
+ * @returns {{ merged: Array<object>, count: number }}
+ */
+function mergeArrayById(existingArr, incomingArr, maxLen = Infinity) {
+    const result = deepClone(existingArr || []);
+    let count = 0;
+    for (const item of incomingArr || []) {
+        if (!item || typeof item !== 'object') continue;
+        const idx = item.id ? result.findIndex(x => x.id === item.id) : -1;
+        if (idx >= 0) {
+            result[idx] = { ...result[idx], ...item };
+            count++;
+        } else if (result.length < maxLen) {
+            result.push(deepClone(item));
+            count++;
+        }
+    }
+    return { merged: result, count };
+}
+
+/**
+ * 从 JSON 文本导入配置（支持「完整替换 replace」与「增量合并 merge」）
+ * @param {string} jsonText
+ * @param {'replace'|'merge'} mode
+ * @param {object|null} currentConfig 增量合并时必传
+ * @returns {Promise<{ config: object, summary: string }>}
+ */
+export async function importConfigFromJsonText(jsonText, mode = 'replace', currentConfig = null) {
+    const cleaned = stripMarkdownJsonFence(jsonText);
     let parsed;
     try {
-        parsed = JSON.parse(jsonText);
+        parsed = JSON.parse(cleaned);
     } catch (err) {
-        throw new Error(`JSON 格式有误，请检查括号或逗号是否成对：${err.message}`);
+        throw new Error(`JSON 格式有误，请检查括号、引号或逗号：${err.message}`);
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new Error('JSON 根节点必须是对象格式（以 { 开头）');
     }
+
     const defaults = await loadDefaultConfig();
+
+    if (mode === 'merge' && currentConfig) {
+        const mergedRaw = deepClone(currentConfig);
+        const notes = [];
+
+        if (parsed.general && typeof parsed.general === 'object') {
+            mergedRaw.general = { ...mergedRaw.general, ...parsed.general };
+            notes.push('基础设置');
+        }
+        if (parsed.gauges && typeof parsed.gauges === 'object') {
+            mergedRaw.gauges = {
+                gauge_a: { ...mergedRaw.gauges.gauge_a, ...(parsed.gauges.gauge_a || {}) },
+                gauge_b: { ...mergedRaw.gauges.gauge_b, ...(parsed.gauges.gauge_b || {}) },
+            };
+            notes.push('特殊槽');
+        }
+
+        const sections = [
+            ['statuses', '状态', Infinity],
+            ['skills', '技能', Infinity],
+            ['equipments', '装备', Infinity],
+            ['items', '道具', Infinity],
+            ['allies', '我方角色', MAX_UNITS_PER_SIDE],
+            ['enemies', '敌方单位', MAX_UNITS_PER_SIDE],
+            ['triggerRules', '触发规则', Infinity],
+        ];
+
+        for (const [key, label, maxLen] of sections) {
+            if (Array.isArray(parsed[key]) && parsed[key].length > 0) {
+                const { merged, count } = mergeArrayById(mergedRaw[key], parsed[key], maxLen);
+                mergedRaw[key] = merged;
+                notes.push(`${count} 项${label}`);
+            }
+        }
+
+        const normalized = normalizeConfig(mergedRaw, defaults);
+        saveConfig(normalized);
+        return {
+            config: normalized,
+            summary: notes.length ? `增量合并成功：已导入/更新 ${notes.join('、')}` : '未检测到可合并的字段',
+        };
+    }
+
     const normalized = normalizeConfig(parsed, defaults);
     saveConfig(normalized);
-    return normalized;
-}
-
-/**
- * 获取当前聊天/角色卡的唯一隔离键，确保切换角色卡或切换对话时战斗状态严格隔离
- * @param {object} ctx
- * @returns {string}
- */
-function getCurrentChatScopeKey(ctx) {
-    if (ctx.chatId) return `chat:${ctx.chatId}`;
-    if (ctx.groupId) return `group:${ctx.groupId}`;
-    if (ctx.characterId !== undefined && ctx.characterId !== null && ctx.characterId !== '') {
-        return `char:${ctx.characterId}`;
-    }
-    return '';
+    return {
+        config: normalized,
+        summary: '已完整替换当前方案配置',
+    };
 }
 
 /**
@@ -332,7 +530,6 @@ export function loadBattleState() {
     const ctx = getSTContext();
     const scopeKey = getCurrentChatScopeKey(ctx);
 
-    // 优先读取当前聊天专属的 chatMetadata
     if (ctx.chatMetadata && typeof ctx.chatMetadata === 'object') {
         const metaEntry = ctx.chatMetadata[EXTENSION_KEY];
         if (metaEntry && Object.prototype.hasOwnProperty.call(metaEntry, 'battleState')) {
@@ -340,7 +537,6 @@ export function loadBattleState() {
         }
     }
 
-    // 按 scopeKey 隔离的兜底存储（绝不跨角色卡/跨聊天串数据）
     if (scopeKey && ctx.extensionSettings?.[EXTENSION_KEY]?.battleStatesByChat) {
         const scoped = ctx.extensionSettings[EXTENSION_KEY].battleStatesByChat[scopeKey];
         return scoped ? deepClone(scoped) : null;
@@ -372,7 +568,6 @@ export function saveBattleState(battleState) {
         }
     }
 
-    // 同步按 scopeKey 写入隔离映射，兼容部分前端壳不持久化 chatMetadata 的情况
     if (scopeKey && ctx.extensionSettings) {
         if (!ctx.extensionSettings[EXTENSION_KEY]) {
             ctx.extensionSettings[EXTENSION_KEY] = {};
@@ -385,7 +580,6 @@ export function saveBattleState(battleState) {
         } else {
             delete ctx.extensionSettings[EXTENSION_KEY].battleStatesByChat[scopeKey];
         }
-        // 清理旧版本的全局兜底字段，彻底杜绝串卡
         delete ctx.extensionSettings[EXTENSION_KEY].fallbackBattleState;
         if (typeof ctx.saveSettingsDebounced === 'function') {
             ctx.saveSettingsDebounced();

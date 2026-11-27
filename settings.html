@@ -1,4 +1,4 @@
-<!-- SillyTavern Extensions 侧边栏可视化配置面板（零代码实时编辑） -->
+<!-- SillyTavern Extensions 侧边栏可视化配置面板 v1.1（零代码实时编辑 + 粘贴增量合并导入） -->
 <div id="stcf-settings-container" class="stcf-settings-container">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
@@ -6,23 +6,38 @@
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content stcf-settings-content">
+            <!-- 当前配置归属提示条 -->
+            <div id="stcf-profile-banner" class="stcf-profile-banner">📂 当前配置：全局默认方案</div>
+
             <!-- 顶部分类标签页 -->
             <div class="stcf-tabs" role="tablist">
                 <button type="button" class="stcf-tab-btn active" data-tab="general">基础与导入导出</button>
                 <button type="button" class="stcf-tab-btn" data-tab="units">参战角色(4v4)</button>
                 <button type="button" class="stcf-tab-btn" data-tab="skills">技能库</button>
+                <button type="button" class="stcf-tab-btn" data-tab="equipments">装备库</button>
+                <button type="button" class="stcf-tab-btn" data-tab="items">道具库</button>
                 <button type="button" class="stcf-tab-btn" data-tab="statuses">状态/Buff</button>
-                <button type="button" class="stcf-tab-btn" data-tab="rules">阈值提示词</button>
+                <button type="button" class="stcf-tab-btn" data-tab="rules">阈值触发</button>
             </div>
 
             <!-- ==================== 1. 基础设置与导入导出 ==================== -->
             <div class="stcf-tab-pane active" data-pane="general">
                 <div class="stcf-section-card">
-                    <div class="stcf-section-title">基础开关与战报输出</div>
+                    <div class="stcf-section-title">基础开关与角色卡隔离</div>
 
                     <label class="stcf-checkbox-row">
                         <input type="checkbox" id="stcf-set-enabled">
                         <span>启用战斗插件（显示战斗浮标并启用提示词自动注入）</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-per-char">
+                        <span>按角色卡独立保存配置方案（切卡自动切换各自的队伍/技能/装备）</span>
+                    </label>
+
+                    <label class="stcf-checkbox-row">
+                        <input type="checkbox" id="stcf-set-listen-ai">
+                        <span>监听 AI 回复中的 <code>&lt;combat_event&gt;</code> 剧情掉落/开战标签（需用户确认）</span>
                     </label>
 
                     <label class="stcf-checkbox-row">
@@ -36,7 +51,7 @@
                     </label>
 
                     <div class="stcf-field-row">
-                        <label for="stcf-set-output-mode">释放技能后的战报自动输出方式（绝不自动发送）：</label>
+                        <label for="stcf-set-output-mode">释放技能/使用道具后的战报自动输出方式（绝不自动发送）：</label>
                         <select id="stcf-set-output-mode" class="text_pole">
                             <option value="fill_input">自动填入聊天输入框（不发送，等你补充剧情再发）</option>
                             <option value="clipboard">自动复制到剪贴板</option>
@@ -80,12 +95,24 @@
                     </div>
                 </div>
 
+                <!-- 配合“写卡助手”的零代码粘贴快速导入 -->
                 <div class="stcf-section-card">
-                    <div class="stcf-section-title">配置备份与批量编辑（JSON 导入/导出）</div>
-                    <p class="stcf-help-text">你可以导出为 JSON 文件备份，或者用电脑记事本批量改完技能/提示词后再导入回来。</p>
+                    <div class="stcf-section-title">📋 粘贴 JSON 快速导入（配合写卡助手超方便）</div>
+                    <p class="stcf-help-text">直接把写卡助手生成的 JSON（含 <code>```json</code> 代码块也没关系，哪怕只包含几件装备或技能）粘到下方，点<strong>增量合并</strong>即可无缝加入当前配置！</p>
+                    <textarea id="stcf-paste-json" class="text_pole stcf-prompt-textarea" rows="4" placeholder='可直接粘贴完整配置或局部片段，例如：{ "equipments": [...], "items": [...], "skills": [...] }'></textarea>
+                    <div class="stcf-btn-group" style="margin-top:6px;">
+                        <button type="button" id="stcf-btn-merge-paste" class="menu_button">➕ 增量合并导入（推荐）</button>
+                        <button type="button" id="stcf-btn-replace-paste" class="menu_button">🔄 完整覆盖导入</button>
+                    </div>
+                </div>
+
+                <div class="stcf-section-card">
+                    <div class="stcf-section-title">文件备份与方案管理</div>
                     <div class="stcf-btn-group">
-                        <button type="button" id="stcf-btn-export-json" class="menu_button">📤 一键导出 JSON</button>
-                        <button type="button" id="stcf-btn-import-json" class="menu_button">📥 导入 JSON 配置</button>
+                        <button type="button" id="stcf-btn-export-json" class="menu_button">📤 导出 JSON 文件</button>
+                        <button type="button" id="stcf-btn-import-merge-file" class="menu_button">📥 文件增量合并</button>
+                        <button type="button" id="stcf-btn-import-json" class="menu_button">📥 文件完整导入</button>
+                        <button type="button" id="stcf-btn-save-global" class="menu_button" title="将当前方案存为新角色卡的默认模板">⭐ 设为新卡默认模板</button>
                         <button type="button" id="stcf-btn-reset-default" class="menu_button stcf-danger-btn">🔄 恢复出厂默认</button>
                         <input type="file" id="stcf-file-import-json" accept=".json,application/json" class="stcf-hidden">
                     </div>
@@ -122,14 +149,42 @@
                     </div>
                     <div class="stcf-tip-box">
                         <strong>公式可用变量：</strong>
-                        <code>atk</code>(自身攻击)、<code>def</code>(自身防御)、<code>hp</code>、<code>max_hp</code>、<code>gauge_a</code>、<code>gauge_b</code>、
-                        <code>target_def</code>(目标防御)、<code>target_hp</code>、<code>max(a,b)</code>、<code>min(a,b)</code>、<code>rand(min,max)</code>
+                        <code>atk</code>、<code>def</code>、<code>hp</code>、<code>max_hp</code>、<code>gauge_a</code>、<code>gauge_b</code>、
+                        <code>target_def</code>、<code>target_hp</code>、<code>max(a,b)</code>、<code>min(a,b)</code>、<code>rand(min,max)</code>
                     </div>
                     <div id="stcf-skills-editor" class="stcf-editor-list"></div>
                 </div>
             </div>
 
-            <!-- ==================== 4. 状态 / Buff 编辑器 ==================== -->
+            <!-- ==================== 4. 装备库编辑器（v1.1 新增） ==================== -->
+            <div class="stcf-tab-pane" data-pane="equipments">
+                <div class="stcf-section-card">
+                    <div class="stcf-section-header">
+                        <span class="stcf-section-title">装备库（可加属性、解锁专属技能、附带常驻 Buff）</span>
+                        <button type="button" id="stcf-btn-add-equip" class="menu_button stcf-sm-btn">➕ 新增装备</button>
+                    </div>
+                    <div class="stcf-tip-box">
+                        穿戴带有<strong>常驻 Buff</strong> 的装备后，角色在战斗中自动持续享有该状态（如回蓝、攻防倍率提升），卸下后自动移除！
+                    </div>
+                    <div id="stcf-equipments-editor" class="stcf-editor-list"></div>
+                </div>
+            </div>
+
+            <!-- ==================== 5. 道具库编辑器（v1.1 新增） ==================== -->
+            <div class="stcf-tab-pane" data-pane="items">
+                <div class="stcf-section-card">
+                    <div class="stcf-section-header">
+                        <span class="stcf-section-title">战斗消耗品道具库（战斗中使用自动扣库存）</span>
+                        <button type="button" id="stcf-btn-add-item" class="menu_button stcf-sm-btn">➕ 新增道具</button>
+                    </div>
+                    <div class="stcf-tip-box">
+                        支持回复 HP/MP、固定或公式伤害、<strong>净化清除异常状态</strong>、增减特殊槽和附加状态；取消勾选“消耗行动回合”可设为免费快捷道具。
+                    </div>
+                    <div id="stcf-items-editor" class="stcf-editor-list"></div>
+                </div>
+            </div>
+
+            <!-- ==================== 6. 状态 / Buff 编辑器 ==================== -->
             <div class="stcf-tab-pane" data-pane="statuses">
                 <div class="stcf-section-card">
                     <div class="stcf-section-header">
@@ -137,23 +192,23 @@
                         <button type="button" id="stcf-btn-add-status" class="menu_button stcf-sm-btn">➕ 新增状态</button>
                     </div>
                     <div class="stcf-tip-box">
-                        所有状态都会自动按<strong>持续回合数倒计时，归零自动移除</strong>。你可以自由组合持续增减血量/特殊槽、跳过回合、攻防倍率效果。
+                        普通技能附加的状态按<strong>持续回合数倒计时，归零自动移除</strong>；被装备常驻或阈值条件维持挂载的状态则会随穿脱/条件自动生效与解除。
                     </div>
                     <div id="stcf-statuses-editor" class="stcf-editor-list"></div>
                 </div>
             </div>
 
-            <!-- ==================== 5. 阈值触发与 Prompt 注入编辑器 ==================== -->
+            <!-- ==================== 7. 阈值触发（Prompt 注入 + 自动 Buff） ==================== -->
             <div class="stcf-tab-pane" data-pane="rules">
                 <div class="stcf-section-card">
                     <div class="stcf-section-header">
-                        <span class="stcf-section-title">阈值触发与剧情 Prompt 自动注入规则</span>
+                        <span class="stcf-section-title">阈值触发规则（自动挂载 Buff + 自动注入剧情 Prompt）</span>
                         <button type="button" id="stcf-btn-add-rule" class="menu_button stcf-sm-btn">➕ 新增触发规则</button>
                     </div>
                     <div class="stcf-tip-box">
-                        <strong>提示词可用占位符：</strong>
-                        <code>{{unit_name}}</code>(触发角色名)、<code>{{hp}}</code>、<code>{{max_hp}}</code>、<code>{{gauge_a}}</code>、<code>{{gauge_b}}</code>、<code>{{gauge_a_name}}</code>、<code>{{gauge_b_name}}</code>、<code>{{turn}}</code>。
-                        满足条件时自动注入给 AI，条件解除后自动撤回。
+                        <strong>提示词占位符：</strong>
+                        <code>{{unit_name}}</code>、<code>{{hp}}</code>、<code>{{max_hp}}</code>、<code>{{gauge_a}}</code>、<code>{{gauge_b}}</code>、<code>{{gauge_a_name}}</code>、<code>{{gauge_b_name}}</code>、<code>{{turn}}</code>。<br>
+                        状态槽满（<code>&gt;= 100</code>）或空（<code>&lt;= 0</code>）时，可同时自动给角色挂上指定 Buff 并注入 AI 剧情提示词！
                     </div>
                     <div id="stcf-rules-editor" class="stcf-editor-list"></div>
                 </div>

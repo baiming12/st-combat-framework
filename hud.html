@@ -1,4 +1,4 @@
-<!-- TRPG 通用回合制战斗 HUD 悬浮面板（默认折叠为迷你浮标，适配 TauriTavern 窄屏防遮挡） -->
+<!-- TRPG 通用回合制战斗 HUD 悬浮面板 v1.1（默认折叠为迷你浮标，适配 TauriTavern 窄屏防遮挡） -->
 <div id="stcf-hud-root" class="stcf-hud-root stcf-collapsed" aria-label="TRPG 战斗面板">
     <!-- 折叠态：迷你可拖拽浮标 -->
     <button type="button" id="stcf-collapsed-pill" class="stcf-collapsed-pill" title="点击展开战斗面板（按住可拖动位置）">
@@ -17,13 +17,17 @@
                 <span id="stcf-turn-badge" class="stcf-turn-badge">T0</span>
             </div>
             <div class="stcf-header-actions">
+                <button type="button" id="stcf-btn-scan-ai" class="stcf-icon-btn" title="扫描最新一条 AI 回复中的装备/道具/开战标签">🔍</button>
                 <button type="button" id="stcf-btn-gm-mode" class="stcf-icon-btn" title="开关手动数值微调模式">🛠️</button>
                 <button type="button" id="stcf-btn-start-reset" class="stcf-btn stcf-btn-primary stcf-btn-sm">开始战斗</button>
                 <button type="button" id="stcf-btn-collapse" class="stcf-icon-btn" title="折叠回迷你浮标">➖</button>
             </div>
         </div>
 
-        <!-- 阈值 Prompt 注入实时状态提示条（有生效规则时自动高亮显示） -->
+        <!-- AI 剧情事件待确认条（检测到 <combat_event> 获得装备/道具/开战请求时弹出） -->
+        <div id="stcf-event-bar" class="stcf-event-bar stcf-hidden"></div>
+
+        <!-- 阈值 Prompt 注入实时状态提示条 -->
         <div id="stcf-prompt-bar" class="stcf-prompt-bar stcf-hidden">
             <div id="stcf-prompt-bar-toggle" class="stcf-prompt-bar-summary">
                 <span>📌 已自动注入剧情提示词：<strong id="stcf-prompt-count">0</strong> 条（点击展开预览）</span>
@@ -31,17 +35,17 @@
             <div id="stcf-prompt-preview" class="stcf-prompt-preview stcf-hidden"></div>
         </div>
 
-        <!-- 内部可滚动主体区域（防止 4v4 时撑爆窄屏或遮挡聊天输入框） -->
+        <!-- 内部可滚动主体区域 -->
         <div class="stcf-hud-body">
             <!-- 未开启战斗时的引导提示 -->
             <div id="stcf-idle-placeholder" class="stcf-idle-placeholder">
-                <p>当前尚未开始战斗。</p>
-                <p class="stcf-muted">点击右上角 <strong>「开始战斗」</strong> 即可按你在扩展设置中配置的我方/敌方队伍（最多 4v4）开战。</p>
+                <p>当前对话尚未开始战斗。</p>
+                <p class="stcf-muted">点击右上角 <strong>「开始战斗」</strong> 即可按当前角色卡方案开战；或点击 🔍 扫描 AI 回复中的剧情掉落/开战标签。</p>
             </div>
 
             <!-- 战斗中区域 -->
             <div id="stcf-battle-area" class="stcf-hidden">
-                <!-- 窄屏切换标签（宽屏下自动隐藏，直接左右双栏显示） -->
+                <!-- 窄屏切换标签 -->
                 <div class="stcf-mobile-tabs">
                     <button type="button" class="stcf-mobile-tab active" data-side="both">全览</button>
                     <button type="button" class="stcf-mobile-tab" data-side="allies">我方</button>
@@ -60,13 +64,23 @@
                     </div>
                 </div>
 
-                <!-- 操作与技能栏 -->
+                <!-- 操作区：技能 / 道具 / 装备三标签切换 -->
                 <div class="stcf-action-box">
                     <div class="stcf-action-meta">
                         <span>当前行动：<strong id="stcf-current-actor-name">-</strong></span>
                         <span>瞄准目标：<strong id="stcf-current-target-name">-</strong></span>
                     </div>
+
+                    <div class="stcf-action-tabs">
+                        <button type="button" class="stcf-action-tab active" data-action-tab="skills">⚔️ 技能</button>
+                        <button type="button" class="stcf-action-tab" data-action-tab="items">🎒 道具</button>
+                        <button type="button" class="stcf-action-tab" data-action-tab="equip">🛡️ 装备</button>
+                    </div>
+
                     <div id="stcf-skills-bar" class="stcf-skills-bar"></div>
+                    <div id="stcf-items-bar" class="stcf-skills-bar stcf-hidden"></div>
+                    <div id="stcf-equip-bar" class="stcf-equip-bar stcf-hidden"></div>
+
                     <div class="stcf-turn-controls">
                         <button type="button" id="stcf-btn-end-turn" class="stcf-btn stcf-btn-warn">结束我方回合</button>
                         <button type="button" id="stcf-btn-copy-log" class="stcf-btn stcf-btn-secondary" title="将本回合战报复制到剪贴板">📋 复制战报</button>
@@ -85,7 +99,7 @@
             </div>
         </div>
 
-        <!-- 轻量 Toast 提示（如“已复制到剪贴板”、“已填入输入框”） -->
+        <!-- 轻量 Toast 提示 -->
         <div id="stcf-toast" class="stcf-toast stcf-hidden"></div>
     </div>
 </div>

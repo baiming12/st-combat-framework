@@ -1,10 +1,11 @@
 /**
- * 通用回合制战斗核心引擎 (src/engine.js)
+ * 通用回合制战斗核心引擎 (src/engine.js) - v1.1
  * 职责：
- * 1. 纯逻辑计算，严禁硬编码任何技能名、状态名、角色名或剧情文本
+ * 1. 纯逻辑计算，严禁硬编码任何技能名、状态名、角色名、装备名或剧情文本
  * 2. 支持 1v1 ~ 4v4 回合制状态机：我方行动 -> 敌方行动 -> 回合结束结算
  * 3. 支持 4 类通用 Buff/Debuff 机制：每回合持续增减 HP/特殊槽、跳过回合、攻防倍率、倒计时自动移除
- * 4. 内置无 eval 的安全公式解析器，兼容 TauriTavern 严格 CSP 环境
+ * 4. v1.1 新增：装备系统（属性加成、附带技能、穿戴常驻 Buff）、战斗消耗品道具系统（含净化效果）
+ * 5. 内置无 eval 的安全公式解析器，兼容 TauriTavern 严格 CSP 环境
  */
 
 import { MAX_UNITS_PER_SIDE, clamp } from './config.js';
@@ -12,16 +13,9 @@ import { MAX_UNITS_PER_SIDE, clamp } from './config.js';
 /**
  * =========================================================================
  * 一、安全数学公式解析器（无 eval / new Function，彻底规避 CSP 限制）
- * 支持：+ - * / ( )、数字、变量名，以及 max/min/floor/ceil/round/abs/rand 函数
- * 示例：max(1, atk * 1.5 - target_def * 0.4)
  * =========================================================================
  */
 
-/**
- * 将公式字符串拆分为词法 Token
- * @param {string} expr
- * @returns {Array<{type: string, value: string}>}
- */
 function tokenizeFormula(expr) {
     const tokens = [];
     let i = 0;
@@ -53,18 +47,11 @@ function tokenizeFormula(expr) {
             i++;
             continue;
         }
-        // 忽略无法识别的字符，保证不崩溃
         i++;
     }
     return tokens;
 }
 
-/**
- * 安全计算技能公式数值
- * @param {string} formula 公式字符串
- * @param {Record<string, number>} vars 变量字典（如 atk, target_def 等）
- * @returns {number}
- */
 export function evaluateFormula(formula, vars = {}) {
     const tokens = tokenizeFormula(formula);
     if (tokens.length === 0) return 0;
@@ -88,11 +75,7 @@ export function evaluateFormula(formula, vars = {}) {
         while (peek() && peek().type === 'op' && (peek().value === '*' || peek().value === '/')) {
             const op = consume().value;
             const right = parseUnary();
-            if (op === '*') {
-                left = left * right;
-            } else {
-                left = right === 0 ? 0 : left / right;
-            }
+            left = op === '*' ? left * right : (right === 0 ? 0 : left / right);
         }
         return left;
     }
@@ -119,9 +102,8 @@ export function evaluateFormula(formula, vars = {}) {
         if (tok.type === 'ident') {
             consume();
             const name = tok.value;
-            // 函数调用，如 max(a, b)
             if (peek() && peek().type === 'op' && peek().value === '(') {
-                consume(); // '('
+                consume();
                 const args = [];
                 if (!(peek() && peek().type === 'op' && peek().value === ')')) {
                     args.push(parseExpression());
@@ -131,7 +113,7 @@ export function evaluateFormula(formula, vars = {}) {
                     }
                 }
                 if (peek() && peek().type === 'op' && peek().value === ')') {
-                    consume(); // ')'
+                    consume();
                 }
                 return evalFormulaFunc(name, args);
             }
@@ -160,158 +142,205 @@ export function evaluateFormula(formula, vars = {}) {
     }
 }
 
-/**
- * 公式内置安全数学函数
- * @param {string} name
- * @param {number[]} args
- * @returns {number}
- */
 function evalFormulaFunc(name, args) {
     switch (name) {
-        case 'max':
-            return args.length ? Math.max(...args) : 0;
-        case 'min':
-            return args.length ? Math.min(...args) : 0;
-        case 'floor':
-            return Math.floor(args[0] ?? 0);
-        case 'ceil':
-            return Math.ceil(args[0] ?? 0);
-        case 'round':
-            return Math.round(args[0] ?? 0);
-        case 'abs':
-            return Math.abs(args[0] ?? 0);
+        case 'max': return args.length ? Math.max(...args) : 0;
+        case 'min': return args.length ? Math.min(...args) : 0;
+        case 'floor': return Math.floor(args[0] ?? 0);
+        case 'ceil': return Math.ceil(args[0] ?? 0);
+        case 'round': return Math.round(args[0] ?? 0);
+        case 'abs': return Math.abs(args[0] ?? 0);
         case 'rand': {
             const min = args[0] ?? 0;
             const max = args[1] ?? 1;
             return min + Math.random() * (max - min);
         }
-        default:
-            return 0;
+        default: return 0;
     }
 }
 
 /**
  * =========================================================================
- * 二、战斗数据初始化与辅助查询
+ * 二、辅助查询与装备加成结算
  * =========================================================================
  */
 
-/**
- * 将角色模板实例化为战斗中的实时单位对象
- * @param {object} tpl
- * @param {'ally'|'enemy'} side
- * @returns {object}
- */
-function instantiateUnit(tpl, side) {
-    return {
-        id: tpl.id,
-        side,
-        name: tpl.name,
-        maxHp: tpl.maxHp,
-        hp: tpl.maxHp,
-        maxMp: tpl.maxMp,
-        mp: tpl.maxMp,
-        baseAtk: tpl.atk,
-        baseDef: tpl.def,
-        gauges: {
-            gauge_a: clamp(tpl.initialGaugeA ?? 0, 0, 100),
-            gauge_b: clamp(tpl.initialGaugeB ?? 0, 0, 100),
-        },
-        skillIds: Array.isArray(tpl.skillIds) ? [...tpl.skillIds] : [],
-        statuses: [], // [{ statusId, remainingTurns }]
-        hasActed: false,
-    };
-}
-
-/**
- * 根据配置创建全新的战斗状态（最多 4v4）
- * @param {object} config
- * @returns {object}
- */
-export function createBattleState(config) {
-    const enabledAllies = (config.allies || []).filter(u => u.enabled).slice(0, MAX_UNITS_PER_SIDE);
-    const enabledEnemies = (config.enemies || []).filter(u => u.enabled).slice(0, MAX_UNITS_PER_SIDE);
-
-    // 若用户把某一方全关闭了，兜底取第一个，避免空战场
-    const allyTemplates = enabledAllies.length > 0 ? enabledAllies : (config.allies || []).slice(0, 1);
-    const enemyTemplates = enabledEnemies.length > 0 ? enabledEnemies : (config.enemies || []).slice(0, 1);
-
-    const allies = allyTemplates.map(u => instantiateUnit(u, 'ally'));
-    const enemies = enemyTemplates.map(u => instantiateUnit(u, 'enemy'));
-
-    const state = {
-        active: true,
-        turn: 1,
-        phase: 'player_turn', // 'idle' | 'player_turn' | 'enemy_turn' | 'victory' | 'defeat'
-        allies,
-        enemies,
-        selectedActorId: allies[0]?.id || '',
-        selectedTargetId: enemies[0]?.id || '',
-        currentRoundLogs: [], // 当前回合产生的战报条目
-        allLogs: [],          // 历史战报（保留最近 100 条用于面板回顾）
-    };
-
-    appendLog(state, `战斗开始！我方 ${allies.length} 人 vs 敌方 ${enemies.length} 人（第 1 回合）。`);
-    preparePlayerTurn(state, config);
-    return state;
-}
-
-/**
- * 获取全部参战单位
- * @param {object} state
- * @returns {Array<object>}
- */
 export function getAllUnits(state) {
     if (!state) return [];
     return [...(state.allies || []), ...(state.enemies || [])];
 }
 
-/**
- * 根据 ID 查找单位
- * @param {object} state
- * @param {string} unitId
- * @returns {object|undefined}
- */
 export function findUnitById(state, unitId) {
     return getAllUnits(state).find(u => u.id === unitId);
 }
 
-/**
- * 根据 ID 查找技能定义
- * @param {object} config
- * @param {string} skillId
- * @returns {object|undefined}
- */
 export function findSkillById(config, skillId) {
-    return (config.skills || []).find(s => s.id === skillId);
+    return (config?.skills || []).find(s => s.id === skillId);
 }
 
-/**
- * 根据 ID 查找状态模板定义
- * @param {object} config
- * @param {string} statusId
- * @returns {object|undefined}
- */
 export function findStatusDefById(config, statusId) {
-    return (config.statuses || []).find(s => s.id === statusId);
+    return (config?.statuses || []).find(s => s.id === statusId);
 }
 
-/**
- * 判断单位是否存活
- * @param {object} unit
- * @returns {boolean}
- */
+export function findEquipmentById(config, equipId) {
+    return (config?.equipments || []).find(e => e.id === equipId);
+}
+
+export function findItemById(config, itemId) {
+    return (config?.items || []).find(it => it.id === itemId);
+}
+
 export function isAlive(unit) {
     return Boolean(unit && unit.hp > 0);
 }
 
 /**
- * 计算单位叠加所有 Buff/Debuff 后的实时攻击力与防御力
+ * 计算单位当前穿戴装备带来的总属性加成、附带技能与常驻 Buff
  * @param {object} unit
  * @param {object} config
- * @returns {{ atk: number, def: number, atkMultiplier: number, defMultiplier: number, isStunned: boolean }}
+ */
+export function getUnitEquipmentBonuses(unit, config) {
+    let bonusHp = 0;
+    let bonusMp = 0;
+    let bonusAtk = 0;
+    let bonusDef = 0;
+    const grantedSkills = [];
+    const passiveStatuses = [];
+
+    for (const eqId of unit.equipmentIds || []) {
+        const eq = findEquipmentById(config, eqId);
+        if (!eq) continue;
+        bonusHp += Number(eq.bonusHp || 0);
+        bonusMp += Number(eq.bonusMp || 0);
+        bonusAtk += Number(eq.bonusAtk || 0);
+        bonusDef += Number(eq.bonusDef || 0);
+        if (eq.grantSkillId) {
+            grantedSkills.push({ skillId: eq.grantSkillId, equipName: eq.name });
+        }
+        if (eq.passiveStatusId) {
+            passiveStatuses.push({ statusId: eq.passiveStatusId, equipId: eq.id, equipName: eq.name });
+        }
+    }
+
+    return { bonusHp, bonusMp, bonusAtk, bonusDef, grantedSkills, passiveStatuses };
+}
+
+/**
+ * 同步单位因装备变化引起的上限变化与常驻 Buff 挂载/移除
+ * @param {object} unit
+ * @param {object} config
+ * @param {boolean} [fillNewMax=false] 开战初始化时直接按新上限满血满蓝
+ */
+export function syncUnitEquipmentEffects(unit, config, fillNewMax = false) {
+    if (!unit) return;
+    // 兼容 v1 旧存档（没有 baseMaxHp / baseMaxMp 字段时自动补齐）
+    if (!Number.isFinite(unit.baseMaxHp)) unit.baseMaxHp = unit.maxHp;
+    if (!Number.isFinite(unit.baseMaxMp)) unit.baseMaxMp = unit.maxMp;
+    if (!Array.isArray(unit.equipmentIds)) unit.equipmentIds = [];
+    if (!Array.isArray(unit.statuses)) unit.statuses = [];
+
+    const bonus = getUnitEquipmentBonuses(unit, config);
+    const prevMaxHp = unit.maxHp;
+    const prevMaxMp = unit.maxMp;
+
+    unit.maxHp = Math.max(1, unit.baseMaxHp + bonus.bonusHp);
+    unit.maxMp = Math.max(0, unit.baseMaxMp + bonus.bonusMp);
+
+    if (fillNewMax) {
+        unit.hp = unit.maxHp;
+        unit.mp = unit.maxMp;
+    } else {
+        // 战斗中穿戴加血上限的装备时，若单位存活则按增量抬升当前血量；脱下时不超过新上限
+        if (isAlive(unit) && unit.maxHp > prevMaxHp) {
+            unit.hp = Math.min(unit.maxHp, unit.hp + (unit.maxHp - prevMaxHp));
+        } else {
+            unit.hp = clamp(unit.hp, 0, unit.maxHp);
+        }
+        if (unit.maxMp > prevMaxMp) {
+            unit.mp = Math.min(unit.maxMp, unit.mp + (unit.maxMp - prevMaxMp));
+        } else {
+            unit.mp = clamp(unit.mp, 0, unit.maxMp);
+        }
+    }
+
+    // 同步装备附带的常驻 Buff（标记 source: 'equipment'）
+    const desiredKeys = new Set(bonus.passiveStatuses.map(p => `${p.equipId}::${p.statusId}`));
+    // 移除已脱下装备的常驻 Buff
+    unit.statuses = unit.statuses.filter(st => {
+        if (st.source !== 'equipment') return true;
+        return desiredKeys.has(`${st.sourceEquipId}::${st.statusId}`);
+    });
+    // 补充新穿上装备的常驻 Buff
+    for (const ps of bonus.passiveStatuses) {
+        const def = findStatusDefById(config, ps.statusId);
+        if (!def) continue;
+        const exists = unit.statuses.some(
+            st => st.source === 'equipment' && st.sourceEquipId === ps.equipId && st.statusId === ps.statusId
+        );
+        if (!exists) {
+            unit.statuses.push({
+                statusId: def.id,
+                remainingTurns: 99,
+                source: 'equipment',
+                sourceEquipId: ps.equipId,
+                sourceLabel: ps.equipName,
+            });
+        }
+    }
+}
+
+/**
+ * 同步战场上所有单位的装备效果（例如在设置中改完装备数值或 Buff 后即时生效）
+ */
+export function syncAllUnitsEquipment(state, config) {
+    if (!state || !state.active) return;
+    for (const unit of getAllUnits(state)) {
+        syncUnitEquipmentEffects(unit, config, false);
+    }
+}
+
+/**
+ * 获取单位当前可用的完整技能列表（自身技能 + 穿戴装备附带技能）
+ * @param {object} unit
+ * @param {object} config
+ * @returns {Array<{ skill: object, fromEquipmentName: string }>}
+ */
+export function getUnitAvailableSkills(unit, config) {
+    if (!unit) return [];
+    const result = [];
+    const seen = new Set();
+
+    const baseSkillIds = (unit.skillIds && unit.skillIds.length > 0)
+        ? unit.skillIds
+        : (unit.side === 'ally' ? (config.skills || []).map(s => s.id) : []);
+
+    for (const id of baseSkillIds) {
+        if (seen.has(id)) continue;
+        const sk = findSkillById(config, id);
+        if (sk) {
+            seen.add(id);
+            result.push({ skill: sk, fromEquipmentName: '' });
+        }
+    }
+
+    const bonus = getUnitEquipmentBonuses(unit, config);
+    for (const gs of bonus.grantedSkills) {
+        if (seen.has(gs.skillId)) continue;
+        const sk = findSkillById(config, gs.skillId);
+        if (sk) {
+            seen.add(gs.skillId);
+            result.push({ skill: sk, fromEquipmentName: gs.equipName });
+        }
+    }
+
+    return result;
+}
+
+/**
+ * 计算单位叠加装备加成与全部 Buff/Debuff 后的实时攻击力与防御力
  */
 export function getEffectiveStats(unit, config) {
+    const bonus = getUnitEquipmentBonuses(unit, config);
     let atkMultiplier = 1;
     let defMultiplier = 1;
     let isStunned = false;
@@ -332,9 +361,12 @@ export function getEffectiveStats(unit, config) {
         }
     }
 
+    const totalBaseAtk = Math.max(0, (unit.baseAtk || 0) + bonus.bonusAtk);
+    const totalBaseDef = Math.max(0, (unit.baseDef || 0) + bonus.bonusDef);
+
     return {
-        atk: Math.max(0, Math.round(unit.baseAtk * atkMultiplier)),
-        def: Math.max(0, Math.round(unit.baseDef * defMultiplier)),
+        atk: Math.max(0, Math.round(totalBaseAtk * atkMultiplier)),
+        def: Math.max(0, Math.round(totalBaseDef * defMultiplier)),
         atkMultiplier: Number(atkMultiplier.toFixed(2)),
         defMultiplier: Number(defMultiplier.toFixed(2)),
         isStunned,
@@ -343,10 +375,11 @@ export function getEffectiveStats(unit, config) {
 
 /**
  * 追加一条战报日志
- * @param {object} state
- * @param {string} line
  */
-function appendLog(state, line) {
+export function appendBattleLog(state, line) {
+    if (!state || !line) return;
+    if (!Array.isArray(state.currentRoundLogs)) state.currentRoundLogs = [];
+    if (!Array.isArray(state.allLogs)) state.allLogs = [];
     state.currentRoundLogs.push(line);
     state.allLogs.push(`[T${state.turn}] ${line}`);
     if (state.allLogs.length > 100) {
@@ -355,12 +388,74 @@ function appendLog(state, line) {
 }
 
 /**
- * 修改单位某项特殊计量条，并返回变化描述
- * @param {object} unit
- * @param {'gauge_a'|'gauge_b'} gaugeKey
- * @param {number} delta
+ * =========================================================================
+ * 三、战斗初始化
+ * =========================================================================
+ */
+
+function instantiateUnit(tpl, side, config) {
+    const unit = {
+        id: tpl.id,
+        side,
+        name: tpl.name,
+        baseMaxHp: tpl.maxHp,
+        maxHp: tpl.maxHp,
+        hp: tpl.maxHp,
+        baseMaxMp: tpl.maxMp,
+        maxMp: tpl.maxMp,
+        mp: tpl.maxMp,
+        baseAtk: tpl.atk,
+        baseDef: tpl.def,
+        gauges: {
+            gauge_a: clamp(tpl.initialGaugeA ?? 0, 0, 100),
+            gauge_b: clamp(tpl.initialGaugeB ?? 0, 0, 100),
+        },
+        skillIds: Array.isArray(tpl.skillIds) ? [...tpl.skillIds] : [],
+        equipmentIds: Array.isArray(tpl.equipmentIds) ? [...tpl.equipmentIds] : [],
+        statuses: [],
+        hasActed: false,
+    };
+    syncUnitEquipmentEffects(unit, config, true);
+    return unit;
+}
+
+/**
+ * 根据配置创建全新的战斗状态（最多 4v4；支持传入 overrideEnemies 供 AI 剧情一键开战）
  * @param {object} config
- * @returns {string}
+ * @param {Array<object>|null} [overrideEnemies=null]
+ */
+export function createBattleState(config, overrideEnemies = null) {
+    const enabledAllies = (config.allies || []).filter(u => u.enabled).slice(0, MAX_UNITS_PER_SIDE);
+    const enabledEnemies = Array.isArray(overrideEnemies) && overrideEnemies.length > 0
+        ? overrideEnemies.slice(0, MAX_UNITS_PER_SIDE)
+        : (config.enemies || []).filter(u => u.enabled).slice(0, MAX_UNITS_PER_SIDE);
+
+    const allyTemplates = enabledAllies.length > 0 ? enabledAllies : (config.allies || []).slice(0, 1);
+    const enemyTemplates = enabledEnemies.length > 0 ? enabledEnemies : (config.enemies || []).slice(0, 1);
+
+    const allies = allyTemplates.map(u => instantiateUnit(u, 'ally', config));
+    const enemies = enemyTemplates.map(u => instantiateUnit(u, 'enemy', config));
+
+    const state = {
+        active: true,
+        turn: 1,
+        phase: 'player_turn',
+        allies,
+        enemies,
+        selectedActorId: allies[0]?.id || '',
+        selectedTargetId: enemies[0]?.id || '',
+        triggeredRuleUnits: [], // 记录 on_enter 阈值规则已触发的 "ruleId::unitId"
+        currentRoundLogs: [],
+        allLogs: [],
+    };
+
+    appendBattleLog(state, `战斗开始！我方 ${allies.length} 人 vs 敌方 ${enemies.length} 人（第 1 回合）。`);
+    preparePlayerTurn(state, config);
+    return state;
+}
+
+/**
+ * 修改单位某项特殊计量条，并返回变化描述
  */
 function applyGaugeDelta(unit, gaugeKey, delta, config) {
     const num = Math.round(Number(delta) || 0);
@@ -376,12 +471,7 @@ function applyGaugeDelta(unit, gaugeKey, delta, config) {
 }
 
 /**
- * 尝试给单位挂载状态（若已存在同名状态则刷新持续回合数）
- * @param {object} target
- * @param {string} statusId
- * @param {number} chance 0~100
- * @param {object} config
- * @returns {string}
+ * 尝试给单位挂载普通状态（若已存在同名普通状态则刷新持续回合数）
  */
 function tryApplyStatus(target, statusId, chance, config) {
     if (!statusId || !isAlive(target)) return '';
@@ -393,7 +483,7 @@ function tryApplyStatus(target, statusId, chance, config) {
         return '';
     }
 
-    const existing = target.statuses.find(s => s.statusId === statusId);
+    const existing = target.statuses.find(s => s.statusId === statusId && (!s.source || s.source === 'normal'));
     if (existing) {
         existing.remainingTurns = Math.max(existing.remainingTurns, def.duration);
         return `刷新状态「${def.name}」(${existing.remainingTurns}回合)`;
@@ -402,31 +492,24 @@ function tryApplyStatus(target, statusId, chance, config) {
     target.statuses.push({
         statusId: def.id,
         remainingTurns: def.duration,
+        source: 'normal',
     });
     return `附加状态「${def.name}」(${def.duration}回合)`;
 }
 
 /**
  * =========================================================================
- * 三、技能结算与回合制状态机
+ * 四、技能 / 道具 / 装备操作与回合制状态机
  * =========================================================================
  */
 
-/**
- * 解析技能的实际作用目标列表
- * @param {object} state
- * @param {object} actor
- * @param {object} skill
- * @param {string} requestedTargetId
- * @returns {Array<object>}
- */
-function resolveSkillTargets(state, actor, skill, requestedTargetId) {
+function resolveTargets(state, actor, targetType, requestedTargetId) {
     const friends = actor.side === 'ally' ? state.allies : state.enemies;
     const foes = actor.side === 'ally' ? state.enemies : state.allies;
     const aliveFriends = friends.filter(isAlive);
     const aliveFoes = foes.filter(isAlive);
 
-    switch (skill.targetType) {
+    switch (targetType) {
         case 'self':
             return isAlive(actor) ? [actor] : [];
         case 'all_allies':
@@ -445,15 +528,27 @@ function resolveSkillTargets(state, actor, skill, requestedTargetId) {
     }
 }
 
-/**
- * 执行一次单位技能释放（我方与敌方共用，彻底解耦）
- * @param {object} state
- * @param {object} config
- * @param {object} actor
- * @param {object} skill
- * @param {string} targetId
- * @returns {{ ok: boolean, message?: string, logs: string[] }}
- */
+function buildFormulaVars(actor, target, config) {
+    const actorEff = getEffectiveStats(actor, config);
+    const targetEff = getEffectiveStats(target, config);
+    return {
+        atk: actorEff.atk,
+        def: actorEff.def,
+        hp: actor.hp,
+        max_hp: actor.maxHp,
+        mp: actor.mp,
+        max_mp: actor.maxMp,
+        gauge_a: actor.gauges.gauge_a,
+        gauge_b: actor.gauges.gauge_b,
+        target_atk: targetEff.atk,
+        target_def: targetEff.def,
+        target_hp: target.hp,
+        target_max_hp: target.maxHp,
+        target_gauge_a: target.gauges.gauge_a,
+        target_gauge_b: target.gauges.gauge_b,
+    };
+}
+
 function performSkill(state, config, actor, skill, targetId) {
     const actionLogs = [];
 
@@ -464,25 +559,20 @@ function performSkill(state, config, actor, skill, targetId) {
         return { ok: false, message: `${actor.name} 的 MP/体力不足（需要 ${skill.mpCost}，当前 ${actor.mp}）。`, logs: actionLogs };
     }
 
-    const targets = resolveSkillTargets(state, actor, skill, targetId);
+    const targets = resolveTargets(state, actor, skill.targetType, targetId);
     if (targets.length === 0) {
         return { ok: false, message: '没有可生效的存活目标。', logs: actionLogs };
     }
 
-    // 扣除消耗
     actor.mp = Math.max(0, actor.mp - skill.mpCost);
     actor.hasActed = true;
 
-    const actorEff = getEffectiveStats(actor, config);
     const selfNotes = [];
-
-    // 自身特殊计量条变化
     const selfGA = applyGaugeDelta(actor, 'gauge_a', skill.selfGaugeAChange, config);
     const selfGB = applyGaugeDelta(actor, 'gauge_b', skill.selfGaugeBChange, config);
     if (selfGA) selfNotes.push(selfGA);
     if (selfGB) selfNotes.push(selfGB);
 
-    // 若状态施加对象是自身
     if (skill.applyStatusId && skill.applyStatusTarget === 'self') {
         const stText = tryApplyStatus(actor, skill.applyStatusId, skill.applyStatusChance, config);
         if (stText) selfNotes.push(stText);
@@ -491,53 +581,29 @@ function performSkill(state, config, actor, skill, targetId) {
     const targetSummaries = [];
 
     for (const target of targets) {
-        const targetEff = getEffectiveStats(target, config);
-        const vars = {
-            atk: actorEff.atk,
-            def: actorEff.def,
-            hp: actor.hp,
-            max_hp: actor.maxHp,
-            mp: actor.mp,
-            max_mp: actor.maxMp,
-            gauge_a: actor.gauges.gauge_a,
-            gauge_b: actor.gauges.gauge_b,
-            target_atk: targetEff.atk,
-            target_def: targetEff.def,
-            target_hp: target.hp,
-            target_max_hp: target.maxHp,
-            target_gauge_a: target.gauges.gauge_a,
-            target_gauge_b: target.gauges.gauge_b,
-        };
-
-        const rawAmount = evaluateFormula(skill.formula, vars);
-        const amount = Math.max(0, rawAmount);
+        const vars = buildFormulaVars(actor, target, config);
+        const amount = Math.max(0, evaluateFormula(skill.formula, vars));
         const notes = [];
 
         if (skill.effectType === 'damage') {
             target.hp = Math.max(0, target.hp - amount);
             notes.push(`造成 ${amount} 点伤害（剩余 HP ${target.hp}/${target.maxHp}）`);
-            if (target.hp <= 0) {
-                notes.push('倒下');
-            }
+            if (target.hp <= 0) notes.push('倒下');
         } else if (skill.effectType === 'heal') {
             const before = target.hp;
             target.hp = Math.min(target.maxHp, target.hp + amount);
-            const healed = target.hp - before;
-            notes.push(`回复 ${healed} 点 HP（当前 HP ${target.hp}/${target.maxHp}）`);
+            notes.push(`回复 ${target.hp - before} 点 HP（当前 HP ${target.hp}/${target.maxHp}）`);
         } else if (skill.effectType === 'mp_restore') {
             const before = target.mp;
             target.mp = Math.min(target.maxMp, target.mp + amount);
-            const restored = target.mp - before;
-            notes.push(`回复 ${restored} 点 MP/体力（当前 ${target.mp}/${target.maxMp}）`);
+            notes.push(`回复 ${target.mp - before} 点 MP/体力（当前 ${target.mp}/${target.maxMp}）`);
         }
 
-        // 目标特殊计量条变化
         const tGA = applyGaugeDelta(target, 'gauge_a', skill.targetGaugeAChange, config);
         const tGB = applyGaugeDelta(target, 'gauge_b', skill.targetGaugeBChange, config);
         if (tGA) notes.push(tGA);
         if (tGB) notes.push(tGB);
 
-        // 附加状态给目标
         if (skill.applyStatusId && skill.applyStatusTarget !== 'self') {
             const stText = tryApplyStatus(target, skill.applyStatusId, skill.applyStatusChance, config);
             if (stText) notes.push(stText);
@@ -550,38 +616,29 @@ function performSkill(state, config, actor, skill, targetId) {
     const selfSuffix = selfNotes.length ? `；自身：${selfNotes.join('，')}` : '';
     const line = `${actor.name} 使用了「${skill.name}」${mpNote}：${targetSummaries.join('；')}${selfSuffix}。`;
 
-    appendLog(state, line);
+    appendBattleLog(state, line);
     actionLogs.push(line);
 
     return { ok: true, logs: actionLogs };
 }
 
-/**
- * 检查是否达成胜利或失败条件
- * @param {object} state
- * @returns {boolean} 是否已结束战斗
- */
 export function checkBattleOutcome(state) {
     const anyAllyAlive = state.allies.some(isAlive);
     const anyEnemyAlive = state.enemies.some(isAlive);
 
     if (!anyEnemyAlive && anyAllyAlive) {
         state.phase = 'victory';
-        appendLog(state, '敌方全员失去战斗能力，我方取得胜利！');
+        appendBattleLog(state, '敌方全员失去战斗能力，我方取得胜利！');
         return true;
     }
     if (!anyAllyAlive) {
         state.phase = 'defeat';
-        appendLog(state, '我方全员生命值归零，战斗失败！');
+        appendBattleLog(state, '我方全员生命值归零，战斗失败！');
         return true;
     }
     return false;
 }
 
-/**
- * 自动刷新 HUD 选中的当前行动者与瞄准目标（防止指向倒下或已行动角色）
- * @param {object} state
- */
 export function syncDefaultSelections(state) {
     const readyAlly = state.allies.find(u => isAlive(u) && !u.hasActed)
         || state.allies.find(isAlive)
@@ -598,11 +655,6 @@ export function syncDefaultSelections(state) {
     }
 }
 
-/**
- * 准备我方回合：重置已行动标记，并处理眩晕/跳过回合状态
- * @param {object} state
- * @param {object} config
- */
 function preparePlayerTurn(state, config) {
     state.phase = 'player_turn';
     for (const ally of state.allies) {
@@ -613,7 +665,7 @@ function preparePlayerTurn(state, config) {
         const eff = getEffectiveStats(ally, config);
         if (eff.isStunned) {
             ally.hasActed = true;
-            appendLog(state, `${ally.name} 处于行动受限状态，跳过本回合行动！`);
+            appendBattleLog(state, `${ally.name} 处于行动受限状态，跳过本回合行动！`);
         } else {
             ally.hasActed = false;
         }
@@ -622,47 +674,28 @@ function preparePlayerTurn(state, config) {
 }
 
 /**
- * 玩家点击释放技能入口
- * @param {object} state
- * @param {object} config
- * @param {string} actorId
- * @param {string} skillId
- * @param {string} targetId
- * @returns {{ ok: boolean, message?: string, newLogs: string[] }}
+ * 玩家释放技能
  */
 export function executeAllyAction(state, config, actorId, skillId, targetId) {
-    if (!state || !state.active) {
-        return { ok: false, message: '请先开始战斗。', newLogs: [] };
-    }
-    if (state.phase !== 'player_turn') {
-        return { ok: false, message: '当前不是我方行动阶段。', newLogs: [] };
-    }
+    if (!state || !state.active) return { ok: false, message: '请先开始战斗。', newLogs: [] };
+    if (state.phase !== 'player_turn') return { ok: false, message: '当前不是我方行动阶段。', newLogs: [] };
 
     const actor = state.allies.find(u => u.id === actorId);
-    if (!actor) {
-        return { ok: false, message: '请先选择一名我方角色。', newLogs: [] };
-    }
-    if (actor.hasActed) {
-        return { ok: false, message: `${actor.name} 本回合已经行动过了。`, newLogs: [] };
-    }
+    if (!actor) return { ok: false, message: '请先选择一名我方角色。', newLogs: [] };
+    if (actor.hasActed) return { ok: false, message: `${actor.name} 本回合已经行动过了。`, newLogs: [] };
 
     const skill = findSkillById(config, skillId);
-    if (!skill) {
-        return { ok: false, message: '未找到对应的技能配置。', newLogs: [] };
-    }
+    if (!skill) return { ok: false, message: '未找到对应的技能配置。', newLogs: [] };
 
     const logStartIndex = state.currentRoundLogs.length;
     const res = performSkill(state, config, actor, skill, targetId);
-    if (!res.ok) {
-        return { ok: false, message: res.message, newLogs: [] };
-    }
+    if (!res.ok) return { ok: false, message: res.message, newLogs: [] };
 
     if (checkBattleOutcome(state)) {
         syncDefaultSelections(state);
         return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
     }
 
-    // 检查是否所有存活我方角色均已行动完毕
     const hasRemainingActor = state.allies.some(u => isAlive(u) && !u.hasActed);
     if (!hasRemainingActor && config.general?.autoEndPlayerTurn !== false) {
         runEnemyTurnAndRoundEnd(state, config);
@@ -674,60 +707,196 @@ export function executeAllyAction(state, config, actorId, skillId, targetId) {
 }
 
 /**
- * 玩家手动点击“结束我方回合”
- * @param {object} state
- * @param {object} config
- * @returns {{ ok: boolean, message?: string, newLogs: string[] }}
+ * 玩家在战斗中使用消耗品道具（v1.1 新增）
  */
+export function executeUseItem(state, config, actorId, itemId, targetId) {
+    if (!state || !state.active) return { ok: false, message: '请先开始战斗。', newLogs: [] };
+    if (state.phase !== 'player_turn') return { ok: false, message: '当前不是我方行动阶段。', newLogs: [] };
+
+    const actor = state.allies.find(u => u.id === actorId);
+    if (!actor || !isAlive(actor)) return { ok: false, message: '请先选择一名存活的我方角色。', newLogs: [] };
+
+    const item = findItemById(config, itemId);
+    if (!item) return { ok: false, message: '未找到该道具。', newLogs: [] };
+    if (item.quantity <= 0) return { ok: false, message: `「${item.name}」库存不足！`, newLogs: [] };
+    if (item.consumesTurn && actor.hasActed) {
+        return { ok: false, message: `${actor.name} 本回合已行动（该道具会消耗行动回合）。`, newLogs: [] };
+    }
+
+    const targets = resolveTargets(state, actor, item.targetType, targetId);
+    if (targets.length === 0) return { ok: false, message: '没有可生效的存活目标。', newLogs: [] };
+
+    const logStartIndex = state.currentRoundLogs.length;
+    item.quantity = Math.max(0, item.quantity - 1);
+    if (item.consumesTurn) {
+        actor.hasActed = true;
+    }
+
+    const targetSummaries = [];
+    for (const target of targets) {
+        const vars = buildFormulaVars(actor, target, config);
+        const amount = Math.max(0, evaluateFormula(item.formula, vars));
+        const notes = [];
+
+        if (item.effectType === 'heal') {
+            const before = target.hp;
+            target.hp = Math.min(target.maxHp, target.hp + amount);
+            notes.push(`回复 ${target.hp - before} 点 HP（当前 ${target.hp}/${target.maxHp}）`);
+        } else if (item.effectType === 'mp_restore') {
+            const before = target.mp;
+            target.mp = Math.min(target.maxMp, target.mp + amount);
+            notes.push(`回复 ${target.mp - before} 点 MP（当前 ${target.mp}/${target.maxMp}）`);
+        } else if (item.effectType === 'damage') {
+            target.hp = Math.max(0, target.hp - amount);
+            notes.push(`造成 ${amount} 点伤害（剩余 HP ${target.hp}/${target.maxHp}）`);
+            if (target.hp <= 0) notes.push('倒下');
+        } else if (item.effectType === 'cleanse') {
+            const removed = [];
+            target.statuses = (target.statuses || []).filter(st => {
+                // 仅清除临时战斗状态，不误删装备常驻 Buff 或条件维持态
+                if (st.source === 'equipment' || st.source === 'threshold') return true;
+                const def = findStatusDefById(config, st.statusId);
+                if (def) removed.push(def.name);
+                return false;
+            });
+            notes.push(removed.length ? `清除了状态「${removed.join('、')}」` : '当前无临时状态可清除');
+        }
+
+        const tGA = applyGaugeDelta(target, 'gauge_a', item.targetGaugeAChange, config);
+        const tGB = applyGaugeDelta(target, 'gauge_b', item.targetGaugeBChange, config);
+        if (tGA) notes.push(tGA);
+        if (tGB) notes.push(tGB);
+
+        if (item.applyStatusId) {
+            const stText = tryApplyStatus(target, item.applyStatusId, item.applyStatusChance, config);
+            if (stText) notes.push(stText);
+        }
+
+        targetSummaries.push(`对 ${target.name} ${notes.length ? notes.join('，') : '生效'}`);
+    }
+
+    appendBattleLog(
+        state,
+        `${actor.name} 使用了道具「${item.name}」（剩余 ${item.quantity}）：${targetSummaries.join('；')}。`
+    );
+
+    if (checkBattleOutcome(state)) {
+        syncDefaultSelections(state);
+        return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+    }
+
+    if (item.consumesTurn) {
+        const hasRemainingActor = state.allies.some(u => isAlive(u) && !u.hasActed);
+        if (!hasRemainingActor && config.general?.autoEndPlayerTurn !== false) {
+            runEnemyTurnAndRoundEnd(state, config);
+        } else {
+            syncDefaultSelections(state);
+        }
+    }
+
+    return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+}
+
+/**
+ * 战斗中穿戴装备（同部位非饰品自动替换，实时更新属性与装备附带常驻 Buff）
+ */
+export function equipItemOnUnit(state, config, unitId, equipId) {
+    const unit = findUnitById(state, unitId);
+    const equip = findEquipmentById(config, equipId);
+    if (!unit || !equip) return { ok: false, message: '未找到角色或装备。', newLogs: [] };
+
+    if (!Array.isArray(unit.equipmentIds)) unit.equipmentIds = [];
+    if (unit.equipmentIds.includes(equipId)) {
+        return { ok: false, message: `${unit.name} 已经装备了「${equip.name}」。`, newLogs: [] };
+    }
+
+    const logStartIndex = state.currentRoundLogs.length;
+
+    // 武器/头部/防具同部位自动替换；饰品允许同时戴多件
+    let replacedName = '';
+    if (equip.slot !== 'accessory') {
+        const sameSlotIdx = unit.equipmentIds.findIndex(id => findEquipmentById(config, id)?.slot === equip.slot);
+        if (sameSlotIdx >= 0) {
+            replacedName = findEquipmentById(config, unit.equipmentIds[sameSlotIdx])?.name || '';
+            unit.equipmentIds.splice(sameSlotIdx, 1);
+        }
+    }
+
+    unit.equipmentIds.push(equipId);
+    syncUnitEquipmentEffects(unit, config, false);
+
+    // 同步写回配置模板，使下次开战保持最新穿戴状态
+    const tplList = unit.side === 'ally' ? config.allies : config.enemies;
+    const tpl = (tplList || []).find(u => u.id === unit.id);
+    if (tpl) tpl.equipmentIds = [...unit.equipmentIds];
+
+    const buffDef = equip.passiveStatusId ? findStatusDefById(config, equip.passiveStatusId) : null;
+    const buffNote = buffDef ? `，获得常驻状态「${buffDef.name}」` : '';
+    const replaceNote = replacedName ? `（替换了「${replacedName}」）` : '';
+    appendBattleLog(state, `${unit.name} 装备了「${equip.name}」${replaceNote}${buffNote}。`);
+
+    return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+}
+
+/**
+ * 战斗中卸下装备（同步移除属性加成与装备常驻 Buff）
+ */
+export function unequipItemFromUnit(state, config, unitId, equipId) {
+    const unit = findUnitById(state, unitId);
+    const equip = findEquipmentById(config, equipId);
+    if (!unit || !equip) return { ok: false, message: '未找到角色或装备。', newLogs: [] };
+
+    const idx = (unit.equipmentIds || []).indexOf(equipId);
+    if (idx < 0) return { ok: false, message: `${unit.name} 未装备「${equip.name}」。`, newLogs: [] };
+
+    const logStartIndex = state.currentRoundLogs.length;
+    unit.equipmentIds.splice(idx, 1);
+    syncUnitEquipmentEffects(unit, config, false);
+
+    const tplList = unit.side === 'ally' ? config.allies : config.enemies;
+    const tpl = (tplList || []).find(u => u.id === unit.id);
+    if (tpl) tpl.equipmentIds = [...unit.equipmentIds];
+
+    appendBattleLog(state, `${unit.name} 卸下了「${equip.name}」。`);
+    return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
+}
+
 export function endPlayerTurn(state, config) {
-    if (!state || !state.active) {
-        return { ok: false, message: '请先开始战斗。', newLogs: [] };
-    }
-    if (state.phase !== 'player_turn') {
-        return { ok: false, message: '当前战斗已结束或不在我方回合。', newLogs: [] };
-    }
+    if (!state || !state.active) return { ok: false, message: '请先开始战斗。', newLogs: [] };
+    if (state.phase !== 'player_turn') return { ok: false, message: '当前战斗已结束或不在我方回合。', newLogs: [] };
 
     const logStartIndex = state.currentRoundLogs.length;
     runEnemyTurnAndRoundEnd(state, config);
     return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
 }
 
-/**
- * 执行敌方行动阶段 + 回合结束结算 + 进入下一回合
- * @param {object} state
- * @param {object} config
- */
 function runEnemyTurnAndRoundEnd(state, config) {
     state.phase = 'enemy_turn';
 
-    // 1. 敌方行动阶段
     for (const enemy of state.enemies) {
         if (!isAlive(enemy)) continue;
         if (checkBattleOutcome(state)) return;
 
         const eff = getEffectiveStats(enemy, config);
         if (eff.isStunned) {
-            appendLog(state, `${enemy.name} 处于行动受限状态，跳过本回合行动！`);
+            appendBattleLog(state, `${enemy.name} 处于行动受限状态，跳过本回合行动！`);
             continue;
         }
 
-        // 从该敌人的技能列表中筛选当前 MP 足够释放的技能
-        const candidateSkills = (enemy.skillIds || [])
-            .map(id => findSkillById(config, id))
+        const available = getUnitAvailableSkills(enemy, config)
+            .map(entry => entry.skill)
             .filter(sk => sk && enemy.mp >= sk.mpCost);
 
-        // 若该敌人没配可用技能，则兜底找一个 0 消耗的技能
         const fallbackSkill = (config.skills || []).find(sk => sk.mpCost <= enemy.mp);
-        const chosenSkill = candidateSkills.length > 0
-            ? candidateSkills[Math.floor(Math.random() * candidateSkills.length)]
+        const chosenSkill = available.length > 0
+            ? available[Math.floor(Math.random() * available.length)]
             : fallbackSkill;
 
         if (!chosenSkill) {
-            appendLog(state, `${enemy.name} 体力不足，本回合原地待命。`);
+            appendBattleLog(state, `${enemy.name} 体力不足，本回合原地待命。`);
             continue;
         }
 
-        // 敌方目标智能挑选：友方治疗优先给血量最低的同伴，攻击则随机挑存活我方角色
         let chosenTargetId = '';
         if (chosenSkill.targetType === 'single_ally') {
             const aliveEnemyAllies = state.enemies.filter(isAlive).sort((a, b) => (a.hp / a.maxHp) - (b.hp / b.maxHp));
@@ -745,25 +914,16 @@ function runEnemyTurnAndRoundEnd(state, config) {
         if (checkBattleOutcome(state)) return;
     }
 
-    // 2. 回合结束结算（所有单位的 Buff/Debuff 跳血/特殊槽变化 + 回合倒计时归零移除）
     runRoundEndSettlement(state, config);
     if (checkBattleOutcome(state)) return;
 
-    // 3. 进入下一回合
     state.turn += 1;
-    appendLog(state, `—— 进入第 ${state.turn} 回合 ——`);
+    appendBattleLog(state, `—— 进入第 ${state.turn} 回合 ——`);
     preparePlayerTurn(state, config);
 }
 
-/**
- * 回合结束结算：处理每回合持续效果与倒计时移除
- * @param {object} state
- * @param {object} config
- */
 function runRoundEndSettlement(state, config) {
-    const allUnits = getAllUnits(state);
-
-    for (const unit of allUnits) {
+    for (const unit of getAllUnits(state)) {
         if (!isAlive(unit) || !unit.statuses || unit.statuses.length === 0) continue;
 
         const remainingStatuses = [];
@@ -772,7 +932,6 @@ function runRoundEndSettlement(state, config) {
             const def = findStatusDefById(config, activeSt.statusId);
             if (!def) continue;
 
-            // 模板 1（以及任何带有持续数值的状态）：每回合持续增减 HP / MP / 特殊计量条
             if ((def.effectType === 'dot_hot' || def.value !== 0) && Number(def.value) !== 0) {
                 const val = Math.round(Number(def.value));
                 if (def.targetStat === 'hp') {
@@ -780,34 +939,35 @@ function runRoundEndSettlement(state, config) {
                     unit.hp = clamp(unit.hp + val, 0, unit.maxHp);
                     const diff = unit.hp - before;
                     if (diff < 0) {
-                        appendLog(state, `${unit.name} 因「${def.name}」受到 ${Math.abs(diff)} 点持续伤害（HP ${unit.hp}/${unit.maxHp}）。`);
+                        appendBattleLog(state, `${unit.name} 因「${def.name}」受到 ${Math.abs(diff)} 点持续伤害（HP ${unit.hp}/${unit.maxHp}）。`);
                     } else if (diff > 0) {
-                        appendLog(state, `${unit.name} 因「${def.name}」回复 ${diff} 点 HP（HP ${unit.hp}/${unit.maxHp}）。`);
+                        appendBattleLog(state, `${unit.name} 因「${def.name}」回复 ${diff} 点 HP（HP ${unit.hp}/${unit.maxHp}）。`);
                     }
-                    if (unit.hp <= 0) {
-                        appendLog(state, `${unit.name} 倒下了！`);
-                    }
+                    if (unit.hp <= 0) appendBattleLog(state, `${unit.name} 倒下了！`);
                 } else if (def.targetStat === 'mp') {
                     const before = unit.mp;
                     unit.mp = clamp(unit.mp + val, 0, unit.maxMp);
                     const diff = unit.mp - before;
                     if (diff !== 0) {
-                        appendLog(state, `${unit.name} 因「${def.name}」MP/体力 ${diff > 0 ? '+' : ''}${diff}（${unit.mp}/${unit.maxMp}）。`);
+                        appendBattleLog(state, `${unit.name} 因「${def.name}」MP/体力 ${diff > 0 ? '+' : ''}${diff}（${unit.mp}/${unit.maxMp}）。`);
                     }
                 } else if (def.targetStat === 'gauge_a' || def.targetStat === 'gauge_b') {
                     const note = applyGaugeDelta(unit, def.targetStat, val, config);
-                    if (note) {
-                        appendLog(state, `${unit.name} 因「${def.name}」${note}。`);
-                    }
+                    if (note) appendBattleLog(state, `${unit.name} 因「${def.name}」${note}。`);
                 }
             }
 
-            // 模板 4：持续回合数倒计时，归零自动移除
+            // 装备常驻 Buff 与阈值维持态 Buff 不随回合倒计时消失
+            if (activeSt.source === 'equipment' || activeSt.source === 'threshold') {
+                remainingStatuses.push(activeSt);
+                continue;
+            }
+
             activeSt.remainingTurns -= 1;
             if (activeSt.remainingTurns > 0) {
                 remainingStatuses.push(activeSt);
             } else {
-                appendLog(state, `${unit.name} 身上的状态「${def.name}」已失效移除。`);
+                appendBattleLog(state, `${unit.name} 身上的状态「${def.name}」已失效移除。`);
             }
         }
 
@@ -815,13 +975,6 @@ function runRoundEndSettlement(state, config) {
     }
 }
 
-/**
- * 格式化输出战报文本（用于复制到剪贴板或填入酒馆输入框）
- * @param {object} state
- * @param {object} config
- * @param {string[]} lines 指定要格式化的行；若不传则导出本回合全部记录
- * @returns {string}
- */
 export function formatCombatLogOutput(state, config, lines = null) {
     const targetLines = Array.isArray(lines) && lines.length > 0
         ? lines
@@ -837,15 +990,6 @@ export function formatCombatLogOutput(state, config, lines = null) {
     return `${header}\n${body}`;
 }
 
-/**
- * TRPG 跑团便捷微调：允许玩家/GM 在 HUD 上手动微调任意单位的 HP/MP/特殊槽
- * @param {object} state
- * @param {object} config
- * @param {string} unitId
- * @param {'hp'|'mp'|'gauge_a'|'gauge_b'} stat
- * @param {number} delta
- * @returns {boolean}
- */
 export function adjustUnitStatManual(state, config, unitId, stat, delta) {
     const unit = findUnitById(state, unitId);
     if (!unit) return false;
@@ -863,7 +1007,6 @@ export function adjustUnitStatManual(state, config, unitId, stat, delta) {
         return false;
     }
 
-    // 手动改血后重新检查胜负状态（若复活则恢复我方回合）
     if (state.phase === 'victory' || state.phase === 'defeat') {
         if (state.allies.some(isAlive) && state.enemies.some(isAlive)) {
             state.phase = 'player_turn';
