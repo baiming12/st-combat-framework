@@ -86,9 +86,10 @@ function evaluateRule(battleState, rule, config) {
             return { matched, matchedUnits: matched ? enemies : [] };
         }
         case 'specific_unit': {
-            const unit = getAllUnits(battleState).find(u => u.id === rule.unitId);
-            const ok = unit ? doesUnitMatchRule(unit, rule, config) : false;
-            return { matched: ok, matchedUnits: ok ? [unit] : [] };
+            const matchedUnits = getAllUnits(battleState).filter(
+                u => (u.id === rule.unitId || u.templateId === rule.unitId) && doesUnitMatchRule(u, rule, config)
+            );
+            return { matched: matchedUnits.length > 0, matchedUnits };
         }
         default:
             return { matched: false, matchedUnits: [] };

@@ -408,7 +408,7 @@ export function syncAllUnitsEquipment(state, config) {
                 unit.aiTargetMode = tpl.aiTargetMode || unit.aiTargetMode;
             }
         } else {
-            const tpl = (config?.enemies || []).find(e => e.id === unit.id);
+            const tpl = (config?.enemies || []).find(e => e.id === (unit.templateId || unit.id));
             if (tpl) {
                 unit.aiStrategy = tpl.aiStrategy || unit.aiStrategy;
                 unit.aiTargetMode = tpl.aiTargetMode || unit.aiTargetMode;
@@ -532,12 +532,17 @@ export function appendBattleLog(state, line) {
  * =========================================================================
  */
 
-function instantiateUnit(tpl, side, config) {
+function instantiateUnit(tpl, side, config, runtimeOverrides = {}) {
     const rawAlloc = tpl.allocated && typeof tpl.allocated === 'object' ? tpl.allocated : {};
+    const templateId = String(runtimeOverrides.templateId || tpl.templateId || tpl.id || '').trim();
+    const runtimeId = String(runtimeOverrides.id || tpl.id || '').trim();
+    const runtimeName = String(runtimeOverrides.name || tpl.name || runtimeId).trim();
     const unit = {
-        id: tpl.id,
+        id: runtimeId,
+        templateId,
         side,
-        name: tpl.name,
+        name: runtimeName,
+        baseName: String(runtimeOverrides.baseName || tpl.baseName || tpl.name || runtimeName).trim(),
         description: String(tpl.description || ''),
         level: Math.max(1, Math.round(Number(tpl.level ?? 1) || 1)),
         classId: String(tpl.classId || ''),
@@ -702,16 +707,36 @@ export function addEnemyToBattle(state, config, enemyTpl) {
     }
 
     const usedIds = new Set(getAllUnits(state).map(u => u.id));
-    let finalId = String(enemyTpl?.id || `enemy_reinf_${state.enemies.length + 1}`);
+    const baseId = String(enemyTpl?.id || `enemy_reinf_${state.enemies.length + 1}`).trim() || `enemy_reinf_${state.enemies.length + 1}`;
+    let finalId = baseId;
     let suffix = 2;
     while (usedIds.has(finalId)) {
-        finalId = `${enemyTpl?.id || 'enemy_reinf'}_${suffix++}`;
+        finalId = `${baseId}__${suffix++}`;
     }
 
-    const sameNameCount = state.enemies.filter(e => e.name === enemyTpl.name || e.name.startsWith(`${enemyTpl.name}#`)).length;
-    const finalName = sameNameCount > 0 ? `${enemyTpl.name}#${sameNameCount + 1}` : enemyTpl.name;
+    const baseName = String(enemyTpl?.name || finalId).trim() || finalId;
+    const sameNameEnemies = state.enemies.filter(e => (e.baseName || e.name.replace(/#\d+$/, '')) === baseName);
+    let finalName = baseName;
+    if (sameNameEnemies.length > 0) {
+        // 若场上原本只有 1 只未编号同名敌人，自动补标 #1，避免战报与 Buff 来源混淆
+        if (sameNameEnemies.length === 1 && sameNameEnemies[0].name === baseName) {
+            sameNameEnemies[0].name = `${baseName}#1`;
+        }
+        const usedNums = new Set(sameNameEnemies.map(e => {
+            const m = /#(\d+)$/.exec(e.name || '');
+            return m ? Number(m[1]) : 1;
+        }));
+        let num = sameNameEnemies.length + 1;
+        while (usedNums.has(num)) num++;
+        finalName = `${baseName}#${num}`;
+    }
 
-    const newUnit = instantiateUnit({ ...enemyTpl, id: finalId, name: finalName }, 'enemy', config);
+    const newUnit = instantiateUnit(enemyTpl, 'enemy', config, {
+        id: finalId,
+        templateId: baseId,
+        name: finalName,
+        baseName,
+    });
     state.enemies.push(newUnit);
 
     // 若原本已胜利，增援加入后恢复我方行动
@@ -773,8 +798,42 @@ export function createBattleState(config, overrideEnemies = null) {
     const allyTemplates = enabledAllies.length > 0 ? enabledAllies : (config.allies || []).slice(0, 1);
     const enemyTemplates = enabledEnemies.length > 0 ? enabledEnemies : (config.enemies || []).slice(0, 1);
 
-    const allies = allyTemplates.map(u => instantiateUnit(u, 'ally', config));
-    const enemies = enemyTemplates.map(u => instantiateUnit(u, 'enemy', config));
+    // v2.3.3：为同模板/同名参战单位分配全局唯一运行时 ID 与编号名称（哥布林#1、哥布林#2…），
+    // 彻底避免同名敌人索敌错乱、Buff 来源归属串台与束缚解救误伤
+    const usedIds = new Set();
+    const instantiateUniqueList = (templates, side) => {
+        const nameTotals = new Map();
+        for (const tpl of templates) {
+            const bn = String(tpl?.name || tpl?.id || side).trim();
+            nameTotals.set(bn, (nameTotals.get(bn) || 0) + 1);
+        }
+        const nameCounters = new Map();
+        return templates.map((tpl, idx) => {
+            const baseId = String(tpl?.id || `${side}_${idx + 1}`).trim() || `${side}_${idx + 1}`;
+            let runtimeId = baseId;
+            let idSuffix = 2;
+            while (usedIds.has(runtimeId)) {
+                runtimeId = `${baseId}__${idSuffix++}`;
+            }
+            usedIds.add(runtimeId);
+
+            const baseName = String(tpl?.name || baseId).trim() || baseId;
+            const totalSame = nameTotals.get(baseName) || 1;
+            const seq = (nameCounters.get(baseName) || 0) + 1;
+            nameCounters.set(baseName, seq);
+            const runtimeName = totalSame > 1 ? `${baseName}#${seq}` : baseName;
+
+            return instantiateUnit(tpl, side, config, {
+                id: runtimeId,
+                templateId: baseId,
+                name: runtimeName,
+                baseName,
+            });
+        });
+    };
+
+    const allies = instantiateUniqueList(allyTemplates, 'ally');
+    const enemies = instantiateUniqueList(enemyTemplates, 'enemy');
 
     const state = {
         active: true,
@@ -1096,7 +1155,7 @@ function performStruggleAction(state, config, actor, skill = null) {
     actor.hasActed = true;
 
     const actionName = skill ? `使用了「${skill.name}」` : '尝试挣扎';
-    const brokenIds = new Set();
+    const brokenEntries = new Set();
     const summaries = [];
 
     for (const r of restraints) {
@@ -1104,15 +1163,15 @@ function performStruggleAction(state, config, actor, skill = null) {
         const roll = Math.random();
         const label = r.def.restraintObjectName || r.def.name;
         if (roll < chance) {
-            brokenIds.add(r.active.statusId);
+            brokenEntries.add(r.active);
             summaries.push(`挣脱「${label}」成功！（${detail}）`);
         } else {
             summaries.push(`挣脱「${label}」失败（${detail}）`);
         }
     }
 
-    if (brokenIds.size > 0) {
-        actor.statuses = actor.statuses.filter(st => !brokenIds.has(st.statusId));
+    if (brokenEntries.size > 0) {
+        actor.statuses = actor.statuses.filter(st => !brokenEntries.has(st));
     }
 
     if (skill) {
