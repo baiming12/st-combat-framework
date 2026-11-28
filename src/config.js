@@ -8,7 +8,7 @@
  */
 
 export const EXTENSION_KEY = 'st_combat_framework';
-export const MAX_UNITS_PER_SIDE = 4; // 最多支持 4v4
+export const MAX_UNITS_PER_SIDE = 6; // 最多支持 6v6
 
 const RESERVED_GAUGE_IDS = new Set([
     'hp', 'max_hp', 'mp', 'max_mp', 'atk', 'spi', 'def', 'mdef', 'level', 'has_status', 'hp_percent',
@@ -572,7 +572,7 @@ export function normalizeConfig(rawConfig, defaults) {
     const rawItems = Array.isArray(src.items) ? src.items : (base.items || []);
     const items = rawItems.map((it, idx) => normalizeItem(it, idx));
 
-    // 6. 我方与敌方模板库（我方最多 4 人；敌方作为敌人图鉴可存任意多种，开战/增援时场上最多同时 4v4）
+    // 6. 我方与敌方模板库（我方最多 6 人；敌方作为敌人图鉴可存任意多种，开战/增援时场上最多同时 6v6）
     const rawAllies = Array.isArray(src.allies) && src.allies.length > 0 ? src.allies : base.allies;
     const rawEnemies = Array.isArray(src.enemies) && src.enemies.length > 0 ? src.enemies : base.enemies;
     const allies = rawAllies.slice(0, MAX_UNITS_PER_SIDE).map((u, idx) => normalizeUnitTemplate(u, 'ally', idx));

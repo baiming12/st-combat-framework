@@ -11,7 +11,7 @@
  *    - combat.reinforce_enemy_ids: string[] (AI 战中增援请求，确认或忽略后自动清空)
  */
 
-import { clamp, deepClone, getGaugeEntries, getSTContext } from './config.js';
+import { MAX_UNITS_PER_SIDE, clamp, deepClone, getGaugeEntries, getSTContext } from './config.js';
 import { findClassById, findEquipmentById, findItemById, findSkillById, findStatusDefById, syncUnitEquipmentEffects } from './engine.js';
 
 /**
@@ -423,7 +423,7 @@ export function pullFromMvuZod(config, battleState) {
 
     // 3. 检测 AI 通过 MVU 写入的遇敌开战列表 (encounter_enemy_ids)
     if (Array.isArray(combat.encounter_enemy_ids) && combat.encounter_enemy_ids.length > 0) {
-        const enemyIds = combat.encounter_enemy_ids.map(String).filter(Boolean).slice(0, 4);
+        const enemyIds = combat.encounter_enemy_ids.map(String).filter(Boolean).slice(0, MAX_UNITS_PER_SIDE);
         if (enemyIds.length > 0) {
             events.push({
                 uid: `mvu_enc_${enemyIds.join('_')}`,
@@ -437,7 +437,7 @@ export function pullFromMvuZod(config, battleState) {
 
     // 4. 检测 AI 通过 MVU 写入的战斗增援列表 (reinforce_enemy_ids)
     if (Array.isArray(combat.reinforce_enemy_ids) && combat.reinforce_enemy_ids.length > 0) {
-        const enemyIds = combat.reinforce_enemy_ids.map(String).filter(Boolean).slice(0, 4);
+        const enemyIds = combat.reinforce_enemy_ids.map(String).filter(Boolean).slice(0, MAX_UNITS_PER_SIDE);
         if (enemyIds.length > 0) {
             events.push({
                 uid: `mvu_reinf_${enemyIds.join('_')}`,

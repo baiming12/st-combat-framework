@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "baiming12",
-    "version": "2.1.0",
+    "version": "2.1.1",
     "homePage": "https://github.com/baiming12/st-combat-framework",
     "auto_update": true
 }

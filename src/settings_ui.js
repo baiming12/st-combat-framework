@@ -708,7 +708,7 @@ export async function initSettingsUI(deps) {
         const cfg = deps.getConfig();
         const list = side === 'ally' ? cfg.allies : cfg.enemies;
         if (side === 'ally' && list.length >= MAX_UNITS_PER_SIDE) {
-            window.alert(`我方最多支持 ${MAX_UNITS_PER_SIDE} 名参战角色（最多 4v4）。`);
+            window.alert(`我方最多支持 ${MAX_UNITS_PER_SIDE} 名参战角色（最多 ${MAX_UNITS_PER_SIDE}v${MAX_UNITS_PER_SIDE}）。`);
             return;
         }
         const id = makeUniqueId(side, list);

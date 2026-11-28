@@ -8,7 +8,7 @@
  * 5. 战报仅支持“填入输入框（绝不自动发送）”或“复制到剪贴板”
  */
 
-import { getGaugeEntries, saveConfig } from './config.js';
+import { MAX_UNITS_PER_SIDE, getGaugeEntries, saveConfig } from './config.js';
 import { applyMvuVitalsOnBattleStart } from './mvu_bridge.js';
 import {
     addEnemyToBattle,
@@ -424,7 +424,7 @@ export async function initHudUI(deps) {
         for (const custom of ev.enemies || []) {
             list.push(custom);
         }
-        return list.slice(0, 4);
+        return list.slice(0, MAX_UNITS_PER_SIDE);
     }
 
     /** 将事件附带的自定义状态与技能先入库（例如地下城新装备自带的新 Buff/技能） */

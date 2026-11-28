@@ -17,7 +17,7 @@
  * - add_enemy：战斗中敌方增援（支持 enemyId 引用敌人图鉴，或 enemy/enemies 临时新建）
  */
 
-import { getSTContext, normalizeEquipment, normalizeItem, normalizeSkill, normalizeStatusDef } from './config.js';
+import { MAX_UNITS_PER_SIDE, getSTContext, normalizeEquipment, normalizeItem, normalizeSkill, normalizeStatusDef } from './config.js';
 
 const EVENT_TAG_REGEX = /<combat_event>([\s\S]*?)<\/combat_event>/gi;
 
@@ -230,9 +230,9 @@ function normalizeParsedEvent(raw) {
     }
 
     if (type === 'start_combat') {
-        const enemyIds = Array.isArray(raw.enemyIds) ? raw.enemyIds.map(String).filter(Boolean).slice(0, 4) : [];
+        const enemyIds = Array.isArray(raw.enemyIds) ? raw.enemyIds.map(String).filter(Boolean).slice(0, MAX_UNITS_PER_SIDE) : [];
         const rawEnemies = Array.isArray(raw.enemies) ? raw.enemies : [];
-        const enemies = rawEnemies.slice(0, 4).map((e, idx) => normalizeEnemyObj(e, idx));
+        const enemies = rawEnemies.slice(0, MAX_UNITS_PER_SIDE).map((e, idx) => normalizeEnemyObj(e, idx));
         return {
             uid,
             type: 'start_combat',
@@ -256,8 +256,8 @@ function normalizeParsedEvent(raw) {
         return {
             uid,
             type: 'add_enemy',
-            enemyIds: enemyIds.slice(0, 4),
-            enemies: customList.slice(0, 4),
+            enemyIds: enemyIds.slice(0, MAX_UNITS_PER_SIDE),
+            enemies: customList.slice(0, MAX_UNITS_PER_SIDE),
             bundledStatuses,
             bundledSkills,
         };
