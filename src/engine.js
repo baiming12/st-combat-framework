@@ -576,6 +576,7 @@ function instantiateUnit(tpl, side, config) {
         autoControl: side === 'ally' ? Boolean(tpl.autoControl) : false,
         cooldowns: {}, // { [skillId]: remainingTurns }
         statuses: [],
+        plannedIntent: null, // v2.3: 敌方本回合提前选定的意图 { kind, skillId, targetId, interrupted, interruptedBy }
         hasActed: false,
     };
     syncUnitEquipmentEffects(unit, config, true);
@@ -716,6 +717,9 @@ export function addEnemyToBattle(state, config, enemyTpl) {
     // 若原本已胜利，增援加入后恢复我方行动
     if (state.phase === 'victory' && state.allies.some(isAlive)) {
         state.phase = 'player_turn';
+    }
+    if (state.phase === 'player_turn') {
+        planSingleEnemyIntent(state, config, newUnit);
     }
     appendBattleLog(state, `⚠️ 敌方增援：${newUnit.name}（HP ${newUnit.maxHp}）加入了战斗！`);
     syncDefaultSelections(state);
@@ -1538,6 +1542,18 @@ function performSkill(state, config, actor, skill, targetId) {
 
     const targetSummaries = [];
     const attackedTargetIds = [];
+    const hitHostileMap = new Map();
+    const recordHostileHit = (unit, isDmg) => {
+        if (!unit || unit.side === actor.side) return;
+        const prev = hitHostileMap.get(unit.id) || {
+            isDamage: false,
+            canInterrupt: false,
+            interruptChance: clamp(skill.interruptChance ?? 100, 1, 100),
+        };
+        prev.isDamage = prev.isDamage || Boolean(isDmg);
+        prev.canInterrupt = prev.canInterrupt || Boolean(skill.canInterrupt);
+        hitHostileMap.set(unit.id, prev);
+    };
     let mainTotalAmount = 0;
 
     for (const target of targets) {
@@ -1564,7 +1580,10 @@ function performSkill(state, config, actor, skill, targetId) {
             }
             mainTotalAmount += amount;
             target.hp = Math.max(0, target.hp - amount);
-            if (target.side !== actor.side) attackedTargetIds.push(target.id);
+            if (target.side !== actor.side) {
+                attackedTargetIds.push(target.id);
+                recordHostileHit(target, true);
+            }
             const critTag = isCrit ? '💥暴击！' : '';
             const vulnTag = targetEff.damageTakenMultiplier !== 1 ? `[承伤×${targetEff.damageTakenMultiplier}]` : '';
             notes.push(`${critTag}造成 ${amount} 点伤害${vulnTag}（剩余 HP ${target.hp}/${target.maxHp}）`);
@@ -1579,6 +1598,8 @@ function performSkill(state, config, actor, skill, targetId) {
             const before = target.mp;
             target.mp = Math.min(target.maxMp, target.mp + amount);
             notes.push(`回复 ${target.mp - before} 点 MP/体力（当前 ${target.mp}/${target.maxMp}）`);
+        } else if (skill.canInterrupt && target.side !== actor.side) {
+            recordHostileHit(target, false);
         }
 
         notes.push(...applyGaugeChanges(target, skill.targetGaugeChanges, skill.targetGaugeAChange, skill.targetGaugeBChange, config));
@@ -1612,7 +1633,10 @@ function performSkill(state, config, actor, skill, targetId) {
                     ? Math.max(0, Math.round(efAmount * etEff.damageTakenMultiplier))
                     : efAmount;
                 et.hp = Math.max(0, et.hp - finalEfDmg);
-                if (et.side !== actor.side) attackedTargetIds.push(et.id);
+                if (et.side !== actor.side) {
+                    attackedTargetIds.push(et.id);
+                    recordHostileHit(et, true);
+                }
                 efNotes.push(`造成 ${finalEfDmg} 点伤害（剩余 HP ${et.hp}/${et.maxHp}）`);
                 if (et.hp <= 0) efNotes.push('倒下');
             } else if (ef.effectType === 'heal') {
@@ -1681,6 +1705,16 @@ function performSkill(state, config, actor, skill, targetId) {
         actionLogs.push(...freed);
     }
 
+    // v2.3：尝试打断敌方提前选定的可打断意图
+    for (const [hitId, hitInfo] of hitHostileMap.entries()) {
+        const hitUnit = findUnitById(state, hitId);
+        const intLogs = tryInterruptUnitIntent(state, config, hitUnit, actor, {
+            ...hitInfo,
+            sourceName: skill.name,
+        });
+        actionLogs.push(...intLogs);
+    }
+
     return { ok: true, logs: actionLogs };
 }
 
@@ -1725,6 +1759,228 @@ export function syncDefaultSelections(state) {
     }
 }
 
+/**
+ * 获取技能的通用行动类型文案（用于敌人意图「仅显示类型」模式）
+ */
+export function getSkillIntentTypeLabel(skill) {
+    if (!skill) return '行动';
+    if (skill.effectType === 'damage') {
+        return skill.targetType === 'all_enemies' ? '⚔️ 群体攻击' : '⚔️ 单体攻击';
+    }
+    if (skill.effectType === 'heal') {
+        return skill.targetType === 'all_allies' ? '💚 群体治疗' : '💚 治疗回复';
+    }
+    if (skill.effectType === 'mp_restore') return '💧 能量回复';
+    if (skill.effectType === 'struggle') return '⛓️ 挣扎脱离';
+    return skill.targetType === 'all_enemies' ? '✨ 群体干扰/状态' : '✨ 状态/特殊行动';
+}
+
+/**
+ * 格式化敌方单位的本回合提前选定意图，供 HUD 与 AI 战况同步统一渲染
+ */
+export function formatEnemyIntentSummary(unit, state, config, modeOverride = null) {
+    if (!unit || unit.side !== 'enemy' || !isAlive(unit) || !unit.plannedIntent) return null;
+    const mode = modeOverride || config?.general?.enemyIntentDisplay || 'full';
+    if (mode === 'hidden') return null;
+
+    const intent = unit.plannedIntent;
+    if (intent.interrupted) {
+        const sk = intent.skillId ? findSkillById(config, intent.skillId) : null;
+        const skName = sk?.name || '技能';
+        return {
+            visible: true,
+            interrupted: true,
+            isInterruptible: false,
+            text: `💫 已被打断（跳过本回合）`,
+            badge: '',
+            badgeKind: 'interrupted',
+            tooltip: `原定释放「${skName}」，已被 ${intent.interruptedBy || '我方'} 打断，本回合跳过行动并进入冷却。`,
+        };
+    }
+
+    if (intent.kind === 'stunned') {
+        if (mode === 'interruptible_only') return null;
+        return {
+            visible: true,
+            interrupted: false,
+            isInterruptible: false,
+            text: '😵 受控（跳过本回合）',
+            badge: '',
+            badgeKind: 'normal',
+            tooltip: '处于行动受限状态，本回合无法行动。',
+        };
+    }
+
+    if (intent.kind === 'struggle') {
+        if (mode === 'interruptible_only') return null;
+        return {
+            visible: true,
+            interrupted: false,
+            isInterruptible: false,
+            text: '⛓️ 准备挣扎脱离束缚',
+            badge: '',
+            badgeKind: 'normal',
+            tooltip: '当前处于束缚状态，敌方回合将尝试挣扎脱离。',
+        };
+    }
+
+    if (intent.kind === 'idle' || !intent.skillId) {
+        if (mode === 'interruptible_only') return null;
+        return {
+            visible: true,
+            interrupted: false,
+            isInterruptible: false,
+            text: '💤 原地待命',
+            badge: '',
+            badgeKind: 'normal',
+            tooltip: '暂无可满足释放条件的技能，本回合将待命。',
+        };
+    }
+
+    const sk = findSkillById(config, intent.skillId);
+    if (!sk) return null;
+
+    const intMode = sk.interruptible || 'none';
+    const isInterruptible = intMode === 'by_interrupt' || intMode === 'by_any_hit';
+    if (mode === 'interruptible_only' && !isInterruptible) return null;
+
+    let targetLabel = '';
+    if (sk.targetType === 'all_enemies') targetLabel = '全体我方';
+    else if (sk.targetType === 'all_allies') targetLabel = '全体敌方';
+    else if (sk.targetType === 'self') targetLabel = '自身';
+    else if (intent.targetId) targetLabel = findUnitById(state, intent.targetId)?.name || '目标';
+
+    const actionLabel = mode === 'type_only'
+        ? getSkillIntentTypeLabel(sk)
+        : `🎯 ${sk.name}`;
+    const text = targetLabel ? `${actionLabel} → ${targetLabel}` : actionLabel;
+
+    let badge = '';
+    let badgeKind = 'normal';
+    let intTip = '不可被打断（正常释放）';
+    if (intMode === 'by_any_hit') {
+        badge = '💥受击即断';
+        badgeKind = 'any';
+        intTip = '易被打断：在我方回合内受到任意攻击命中即被打断，跳过本回合并进入冷却！';
+    } else if (intMode === 'by_interrupt') {
+        badge = '⚡可打断';
+        badgeKind = 'req';
+        intTip = '可被打断：使用附带【💥打断】效果的技能命中即可打断，跳过本回合并进入冷却！';
+    }
+
+    return {
+        visible: true,
+        interrupted: false,
+        isInterruptible,
+        text,
+        badge,
+        badgeKind,
+        tooltip: `${mode === 'type_only' ? getSkillIntentTypeLabel(sk) : `${sk.name}：${sk.description || ''}`}${targetLabel ? `｜目标：${targetLabel}` : ''}｜${intTip}`,
+    };
+}
+
+/**
+ * 为单个敌方单位提前选定本回合行动意图（回合初或增援入场时调用）
+ */
+export function planSingleEnemyIntent(state, config, enemy) {
+    if (!enemy || enemy.side !== 'enemy') return;
+    if (!isAlive(enemy)) {
+        enemy.plannedIntent = null;
+        return;
+    }
+    const eff = getEffectiveStats(enemy, config);
+    if (eff.isStunned) {
+        enemy.plannedIntent = { kind: 'stunned', skillId: '', targetId: '', interrupted: false, interruptedBy: '' };
+        return;
+    }
+    if (isUnitRestrained(enemy, config)) {
+        enemy.plannedIntent = { kind: 'struggle', skillId: '', targetId: '', interrupted: false, interruptedBy: '' };
+        return;
+    }
+    const chosenPair = pickAiSkillAndTarget(state, config, enemy);
+    if (!chosenPair || !chosenPair.skill) {
+        enemy.plannedIntent = { kind: 'idle', skillId: '', targetId: '', interrupted: false, interruptedBy: '' };
+        return;
+    }
+    enemy.plannedIntent = {
+        kind: 'skill',
+        skillId: chosenPair.skill.id,
+        targetId: chosenPair.targetId || '',
+        interrupted: false,
+        interruptedBy: '',
+    };
+}
+
+/**
+ * 回合初为全体存活敌人提前选定本回合意图
+ */
+export function planAllEnemyIntents(state, config) {
+    for (const enemy of state.enemies || []) {
+        planSingleEnemyIntent(state, config, enemy);
+    }
+}
+
+/**
+ * 我方攻击/打断技能命中敌方时，判定是否打断其本回合提前选定的可打断技能
+ * 打断成功：标记 interrupted=true（跳过本回合行动）+ 该技能进入冷却
+ */
+function tryInterruptUnitIntent(state, config, target, actor, hitInfo) {
+    const logs = [];
+    if (!target || target.side !== 'enemy' || !isAlive(target)) return logs;
+    const intent = target.plannedIntent;
+    if (!intent || intent.kind !== 'skill' || intent.interrupted || !intent.skillId) return logs;
+
+    const intentSkill = findSkillById(config, intent.skillId);
+    if (!intentSkill) return logs;
+
+    const intMode = intentSkill.interruptible || 'none';
+    if (intMode === 'none') return logs;
+
+    let triggered = false;
+    let failedRoll = false;
+    const chance = clamp(hitInfo?.interruptChance ?? 100, 1, 100);
+
+    if (intMode === 'by_any_hit') {
+        if (hitInfo?.isDamage) {
+            triggered = true;
+        } else if (hitInfo?.canInterrupt) {
+            if (Math.random() * 100 < chance) triggered = true;
+            else failedRoll = true;
+        }
+    } else if (intMode === 'by_interrupt') {
+        if (hitInfo?.canInterrupt) {
+            if (Math.random() * 100 < chance) triggered = true;
+            else failedRoll = true;
+        }
+    }
+
+    if (failedRoll) {
+        const line = `⚡ ${actor.name} 的「${hitInfo.sourceName || '技能'}」试图打断 ${target.name} 准备释放的「${intentSkill.name}」，但未能打断！`;
+        appendBattleLog(state, line);
+        logs.push(line);
+        return logs;
+    }
+
+    if (!triggered) return logs;
+
+    intent.interrupted = true;
+    intent.interruptedBy = actor.name;
+
+    const baseCd = Math.max(0, Math.round(Number(intentSkill.cooldown) || 0));
+    let cdNote = '';
+    if (baseCd > 0) {
+        if (!target.cooldowns || typeof target.cooldowns !== 'object') target.cooldowns = {};
+        // 回合结束结算会将全部冷却 -1，CD=1 时补设为 2，确保下回合确实处于冷却中
+        target.cooldowns[intentSkill.id] = Math.max(2, baseCd);
+        cdNote = `，技能进入冷却（${baseCd}回合）`;
+    }
+
+    const line = `💥 打断成功！${actor.name} 的「${hitInfo.sourceName || '攻击'}」打断了 ${target.name} 准备释放的「${intentSkill.name}」，${target.name} 本回合跳过行动${cdNote}！`;
+    appendBattleLog(state, line);
+    logs.push(line);
+    return logs;
+}
+
 function preparePlayerTurn(state, config) {
     state.phase = 'player_turn';
     for (const ally of state.allies) {
@@ -1740,6 +1996,8 @@ function preparePlayerTurn(state, config) {
             ally.hasActed = false;
         }
     }
+    // v2.3：我方回合开始前，敌方全员提前选定本回合意图供显示与破招打断
+    planAllEnemyIntents(state, config);
     syncDefaultSelections(state);
 }
 
@@ -2133,6 +2391,13 @@ export function executeUseItem(state, config, actorId, itemId, targetId) {
     );
     for (const hitId of attackedIds) {
         releaseRestraintsByCaster(state, config, hitId, '受到道具攻击被打断');
+        const hitUnit = findUnitById(state, hitId);
+        tryInterruptUnitIntent(state, config, hitUnit, actor, {
+            isDamage: true,
+            canInterrupt: false,
+            interruptChance: 100,
+            sourceName: item.name,
+        });
     }
 
     if (checkBattleOutcome(state)) {
@@ -2242,26 +2507,69 @@ export function endPlayerTurn(state, config) {
     return { ok: true, newLogs: state.currentRoundLogs.slice(logStartIndex) };
 }
 
+function resolvePlannedEnemyAction(state, config, enemy) {
+    const intent = enemy.plannedIntent;
+    if (!intent || intent.kind !== 'skill' || !intent.skillId) return null;
+    const sk = findSkillById(config, intent.skillId);
+    if (!sk) return null;
+    if (enemy.mp < sk.mpCost) return null;
+    if (getSkillRemainingCooldown(enemy, sk.id) > 0) return null;
+
+    if (sk.targetType === 'single_enemy' || sk.targetType === 'single_ally') {
+        const origTarget = intent.targetId ? findUnitById(state, intent.targetId) : null;
+        if (origTarget && isAlive(origTarget) && checkSkillPrerequisite(state, config, enemy, sk, origTarget.id).ok) {
+            return { skill: sk, targetId: origTarget.id };
+        }
+        // 原定单体目标若已倒下或不再满足条件，尝试顺延寻找同阵营另一名合法目标
+        const pool = sk.targetType === 'single_enemy' ? state.allies : state.enemies;
+        const alt = pool.filter(u => isAlive(u) && checkSkillPrerequisite(state, config, enemy, sk, u.id).ok);
+        if (alt.length > 0) {
+            return { skill: sk, targetId: alt[Math.floor(Math.random() * alt.length)].id };
+        }
+        return null;
+    }
+
+    const tId = sk.targetType === 'self' ? enemy.id : '';
+    if (checkSkillPrerequisite(state, config, enemy, sk, tId).ok) {
+        return { skill: sk, targetId: tId };
+    }
+    return null;
+}
+
 function runEnemyTurnAndRoundEnd(state, config) {
     state.phase = 'enemy_turn';
 
     for (const enemy of state.enemies) {
-        if (!isAlive(enemy)) continue;
+        if (!isAlive(enemy)) {
+            enemy.plannedIntent = null;
+            continue;
+        }
         if (checkBattleOutcome(state)) return;
+
+        // v2.3：本回合意图已被打断 -> 跳过本回合行动
+        if (enemy.plannedIntent?.interrupted) {
+            appendBattleLog(state, `💫 ${enemy.name} 本回合施法已被打断，跳过行动！`);
+            enemy.plannedIntent = null;
+            continue;
+        }
 
         const eff = getEffectiveStats(enemy, config);
         if (eff.isStunned) {
             appendBattleLog(state, `${enemy.name} 处于行动受限状态，跳过本回合行动！`);
+            enemy.plannedIntent = null;
             continue;
         }
 
         // v1.7：被束缚的敌方自动尝试挣扎脱离
         if (isUnitRestrained(enemy, config)) {
+            enemy.plannedIntent = null;
             performStruggleAction(state, config, enemy, null);
             continue;
         }
 
-        const chosenPair = pickAiSkillAndTarget(state, config, enemy);
+        // v2.3：优先执行回合初提前选定的意图；若期间局势变化导致原定技能失效，再降级重选
+        const chosenPair = resolvePlannedEnemyAction(state, config, enemy) || pickAiSkillAndTarget(state, config, enemy);
+        enemy.plannedIntent = null;
         if (!chosenPair) {
             appendBattleLog(state, `${enemy.name} 暂无可满足释放条件的技能，本回合原地待命。`);
             continue;

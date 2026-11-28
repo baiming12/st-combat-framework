@@ -92,6 +92,16 @@
                     </label>
 
                     <div class="stcf-field-row">
+                        <label for="stcf-set-enemy-intent-display">🎯 敌方本回合意图预告显示方式（回合初提前选定，供观察与打断）：</label>
+                        <select id="stcf-set-enemy-intent-display" class="text_pole">
+                            <option value="full">显示完整技能名、目标与可打断标记（默认）</option>
+                            <option value="type_only">隐藏技能名，仅显示行动类型（攻击/治疗/状态）与目标</option>
+                            <option value="interruptible_only">仅预告「可被打断」的技能（普通技能隐藏）</option>
+                            <option value="hidden">隐藏 HUD 意图栏</option>
+                        </select>
+                    </div>
+
+                    <div class="stcf-field-row">
                         <label for="stcf-set-output-mode">释放技能/使用道具后的战报自动输出方式（绝不自动发送）：</label>
                         <select id="stcf-set-output-mode" class="text_pole">
                             <option value="fill_input">自动填入聊天输入框（不发送，等你补充剧情再发）</option>

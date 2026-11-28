@@ -31,6 +31,7 @@ import {
     findStatusDefById,
     findUnitById,
     formatCombatLogOutput,
+    formatEnemyIntentSummary,
     getEffectiveStats,
     getSkillRemainingCooldown,
     getUnitAvailableSkills,
@@ -923,6 +924,16 @@ export async function initHudUI(deps) {
             isSelectedTarget ? 'stcf-selected-target' : '',
         ].filter(Boolean).join(' ');
 
+        const intentInfo = (unit.side === 'enemy' && alive && state.phase === 'player_turn')
+            ? formatEnemyIntentSummary(unit, state, config)
+            : null;
+        const intentHtml = intentInfo ? `
+            <div class="stcf-intent-row ${intentInfo.interrupted ? 'is-interrupted' : (intentInfo.isInterruptible ? 'is-interruptible' : '')}" title="${escapeHtml(intentInfo.tooltip)}">
+                <span class="stcf-intent-text">${escapeHtml(intentInfo.text)}</span>
+                ${intentInfo.badge ? `<span class="stcf-intent-badge stcf-intent-${escapeHtml(intentInfo.badgeKind)}">${escapeHtml(intentInfo.badge)}</span>` : ''}
+            </div>
+        ` : '';
+
         return `
             <div class="${classes}" data-unit-id="${escapeHtml(unit.id)}" data-unit-side="${unit.side}">
                 <div class="stcf-unit-top">
@@ -938,6 +949,7 @@ export async function initHudUI(deps) {
                         ${alive ? `<button type="button" class="stcf-target-pin ${isSelectedTarget ? 'active' : ''}" data-pin-target="${escapeHtml(unit.id)}" title="设为技能/道具瞄准目标">🎯</button>` : ''}
                     </div>
                 </div>
+                ${intentHtml}
 
                 <div class="stcf-bar-group">
                     <div class="stcf-bar-row">
@@ -1043,13 +1055,14 @@ export async function initHudUI(deps) {
                     const preCheck = actor ? checkSkillPrerequisite(state, config, actor, sk, state.selectedTargetId) : { ok: true };
                     const disabled = !canAct || lackMp || !preCheck.ok;
                     const typeBadge = TARGET_TYPE_BADGES[sk.targetType] || '';
+                    const intTag = sk.canInterrupt ? ` · 💥打断${(sk.interruptChance ?? 100) < 100 ? `${sk.interruptChance}%` : ''}` : '';
                     const srcTag = fromEquipmentName ? ` · 🛡️${fromEquipmentName}` : (fromClassName ? ` · 🎓${fromClassName}` : '');
                     const lockTag = remCd > 0 ? ` · ⏳CD ${remCd}T` : (!preCheck.ok ? ' · 🔒需前置' : '');
-                    const tip = `${sk.description || sk.name}｜消耗 ${sk.mpCost} MP${sk.cooldown ? `｜冷却 ${sk.cooldown}T` : ''}｜公式：${sk.formula}${!preCheck.ok ? `｜⚠️ ${preCheck.reason}` : ''}`;
+                    const tip = `${sk.description || sk.name}｜消耗 ${sk.mpCost} MP${sk.cooldown ? `｜冷却 ${sk.cooldown}T` : ''}${sk.canInterrupt ? `｜💥可打断敌方蓄力/可打断意图(${sk.interruptChance ?? 100}%)` : ''}｜公式：${sk.formula}${!preCheck.ok ? `｜⚠️ ${preCheck.reason}` : ''}`;
                     return `
                         <button type="button" class="stcf-skill-btn" data-skill-id="${escapeHtml(sk.id)}" ${disabled ? 'disabled' : ''} title="${escapeHtml(tip)}">
                             <span class="stcf-skill-name">${remCd > 0 ? '⏳ ' : (!preCheck.ok ? '🔒 ' : '')}${escapeHtml(sk.name)}</span>
-                            <span class="stcf-skill-meta">${typeBadge}${sk.mpCost > 0 ? ` · ${sk.mpCost}MP` : ''}${escapeHtml(srcTag)}${lockTag}</span>
+                            <span class="stcf-skill-meta">${typeBadge}${sk.mpCost > 0 ? ` · ${sk.mpCost}MP` : ''}${intTag}${escapeHtml(srcTag)}${lockTag}</span>
                         </button>
                     `;
                 }).join('') + defendBtnHtml;

@@ -168,6 +168,7 @@ export async function initSettingsUI(deps) {
     const elAuthoringMode = container.querySelector('#stcf-set-authoring-mode');
     const elHudCollapsed = container.querySelector('#stcf-set-hud-collapsed');
     const elAutoEndTurn = container.querySelector('#stcf-set-auto-end-turn');
+    const elEnemyIntentDisplay = container.querySelector('#stcf-set-enemy-intent-display');
     const elOutputMode = container.querySelector('#stcf-set-output-mode');
     const elFillStrategy = container.querySelector('#stcf-set-fill-strategy');
     const elLogHeader = container.querySelector('#stcf-set-log-header');
@@ -201,6 +202,7 @@ export async function initSettingsUI(deps) {
     });
     elHudCollapsed.addEventListener('change', () => { deps.getConfig().general.hudStartCollapsed = elHudCollapsed.checked; commitChange(); });
     elAutoEndTurn.addEventListener('change', () => { deps.getConfig().general.autoEndPlayerTurn = elAutoEndTurn.checked; commitChange(); });
+    elEnemyIntentDisplay?.addEventListener('change', () => { deps.getConfig().general.enemyIntentDisplay = elEnemyIntentDisplay.value; commitChange(); });
     elOutputMode.addEventListener('change', () => { deps.getConfig().general.outputMode = elOutputMode.value; commitChange(); });
     elFillStrategy.addEventListener('change', () => { deps.getConfig().general.inputFillStrategy = elFillStrategy.value; commitChange(); });
     elLogHeader.addEventListener('input', () => { deps.getConfig().general.logHeaderTemplate = elLogHeader.value; commitChange(); });
@@ -1139,12 +1141,17 @@ export async function initSettingsUI(deps) {
                 </div>
             `).join('');
 
+            const intBadges = [
+                sk.interruptible === 'by_any_hit' ? ' · 💥受击即断' : (sk.interruptible === 'by_interrupt' ? ' · ⚡可打断' : ''),
+                sk.canInterrupt ? ` · 🔨打断${(sk.interruptChance ?? 100) < 100 ? `${sk.interruptChance}%` : ''}` : '',
+            ].join('');
+
             return `
                 <details class="stcf-item-card stcf-fold" data-index="${idx}" data-card-key="${escapeHtml(cardKey)}" ${isOpen ? 'open' : ''}>
                     <summary class="stcf-fold-summary">
                         <span class="stcf-fold-title">
                             ${POOL_LABELS[sk.poolType] || '🌐'} [${escapeHtml(sk.worldview || '通用')}] <strong>${escapeHtml(sk.name)}</strong>
-                            <small class="stcf-muted">${sk.mpCost}MP · ${TARGET_LABELS[sk.targetType] || ''}${cdTag}${extraTag}</small>
+                            <small class="stcf-muted">${sk.mpCost}MP · ${TARGET_LABELS[sk.targetType] || ''}${cdTag}${extraTag}${intBadges}</small>
                         </span>
                         <span class="stcf-fold-right">
                             <span class="stcf-id-tag">${escapeHtml(sk.id)}</span>
@@ -1209,6 +1216,20 @@ export async function initSettingsUI(deps) {
                             <label class="stcf-mini-field"><span>命中率 (%)</span><input type="number" min="1" max="100" class="text_pole" data-field="hitRate" value="${sk.hitRate ?? 100}"></label>
                             <label class="stcf-mini-field"><span>暴击率 (%)</span><input type="number" min="0" max="100" class="text_pole" data-field="critRate" value="${sk.critRate ?? 0}"></label>
                             <label class="stcf-mini-field"><span>暴击倍率</span><input type="number" step="0.1" min="1" class="text_pole" data-field="critMultiplier" value="${sk.critMultiplier ?? 1.5}"></label>
+                        </div>
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>敌方施法可否被打断</span>
+                                <select class="text_pole" data-field="interruptible" title="当敌人提前预告释放此技能时，是否可被我方打断（打断后跳过该回合且本技能进入冷却）">
+                                    <option value="none" ${!sk.interruptible || sk.interruptible === 'none' ? 'selected' : ''}>不可打断（正常逻辑）</option>
+                                    <option value="by_interrupt" ${sk.interruptible === 'by_interrupt' ? 'selected' : ''}>⚡ 可被打断（需【打断】技）</option>
+                                    <option value="by_any_hit" ${sk.interruptible === 'by_any_hit' ? 'selected' : ''}>💥 易被打断（受攻击即断）</option>
+                                </select>
+                            </label>
+                            <label class="stcf-checkbox-row" style="align-self:end;padding-bottom:6px;" title="勾选后，本技能命中敌人时可打断敌方「可被打断」的预告意图">
+                                <input type="checkbox" data-field="canInterrupt" ${sk.canInterrupt ? 'checked' : ''}>
+                                <span>💥 附带打断效果</span>
+                            </label>
+                            <label class="stcf-mini-field"><span>打断成功率 (%)</span><input type="number" min="1" max="100" class="text_pole" data-field="interruptChance" value="${sk.interruptChance ?? 100}" title="仅勾选「附带打断效果」时生效"></label>
                         </div>
                         <div class="stcf-grid-2">
                             <label class="stcf-mini-field"><span>AI 优先级（越大越优先）</span><input type="number" min="1" class="text_pole" data-field="aiPriority" value="${sk.aiPriority ?? 10}"></label>
@@ -1402,8 +1423,10 @@ export async function initSettingsUI(deps) {
         }
         if (!e.target.dataset.field) return;
         const field = e.target.dataset.field;
-        skill[field] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
-        commitChange(['name', 'worldview', 'poolType'].includes(field));
+        skill[field] = e.target.type === 'checkbox'
+            ? e.target.checked
+            : (e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value);
+        commitChange(['name', 'worldview', 'poolType', 'interruptible', 'canInterrupt'].includes(field));
     });
     elSkillsEditor.addEventListener('click', (e) => {
         const card = e.target.closest('.stcf-item-card');
@@ -2210,6 +2233,7 @@ export async function initSettingsUI(deps) {
         if (elAuthoringMode) elAuthoringMode.checked = Boolean(cfg.general.authoringMode);
         elHudCollapsed.checked = cfg.general.hudStartCollapsed !== false;
         elAutoEndTurn.checked = cfg.general.autoEndPlayerTurn !== false;
+        if (elEnemyIntentDisplay) elEnemyIntentDisplay.value = cfg.general.enemyIntentDisplay || 'full';
         elOutputMode.value = cfg.general.outputMode || 'fill_input';
         elFillStrategy.value = cfg.general.inputFillStrategy || 'append';
         elLogHeader.value = cfg.general.logHeaderTemplate || '';

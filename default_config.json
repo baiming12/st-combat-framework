@@ -15,6 +15,7 @@
         "outputMode": "fill_input",
         "inputFillStrategy": "append",
         "autoEndPlayerTurn": true,
+        "enemyIntentDisplay": "full",
         "hudStartCollapsed": true,
         "logHeaderTemplate": "【第 {{turn}} 回合战斗记录】",
         "actionLogPrefix": "- "

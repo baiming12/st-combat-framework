@@ -361,6 +361,9 @@ export function normalizeSkill(sk, idx = 0) {
         critMultiplier: Number.isFinite(Number(sk?.critMultiplier)) && Number(sk.critMultiplier) >= 1
             ? Number(Number(sk.critMultiplier).toFixed(2))
             : 1.5,
+        interruptible: ['none', 'by_interrupt', 'by_any_hit'].includes(sk?.interruptible) ? sk.interruptible : 'none',
+        canInterrupt: Boolean(sk?.canInterrupt),
+        interruptChance: clamp(sk?.interruptChance ?? 100, 1, 100),
         aiPriority: Math.max(1, Math.round(Number(sk?.aiPriority ?? 10) || 10)),
         aiHpBelowPercent: clamp(sk?.aiHpBelowPercent ?? 100, 1, 100),
     };
@@ -483,6 +486,9 @@ export function normalizeConfig(rawConfig, defaults) {
     general.syncCatalogToAi = general.syncCatalogToAi !== false;
     general.authoringMode = Boolean(general.authoringMode);
     general.autoEndPlayerTurn = general.autoEndPlayerTurn !== false;
+    general.enemyIntentDisplay = ['full', 'type_only', 'interruptible_only', 'hidden'].includes(general.enemyIntentDisplay)
+        ? general.enemyIntentDisplay
+        : 'full';
     general.hudStartCollapsed = general.hudStartCollapsed !== false;
 
     // 1.5 等级、自由加点与按世界观开关的职业树配置（v1.5 新增）

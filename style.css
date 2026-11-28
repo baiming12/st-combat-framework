@@ -352,6 +352,63 @@
 .stcf-tag-stun  { background: rgba(241, 196, 15, 0.26); color: #ffe17a; }
 .stcf-tag-ko    { background: rgba(231, 76, 60, 0.28); color: #ffa096; }
 
+/* 敌方本回合意图预告条（v2.3） */
+.stcf-intent-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 5px;
+    padding: 3px 7px;
+    border-radius: 5px;
+    font-size: 11px;
+    line-height: 1.3;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #e6ecf5;
+}
+
+.stcf-intent-row.is-interruptible {
+    background: rgba(230, 126, 34, 0.18);
+    border-color: rgba(243, 156, 18, 0.62);
+    color: #ffe2b3;
+}
+
+.stcf-intent-row.is-interrupted {
+    background: rgba(149, 165, 166, 0.16);
+    border-color: rgba(149, 165, 166, 0.35);
+    color: #bdc3c7;
+    text-decoration: line-through;
+}
+
+.stcf-intent-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stcf-intent-badge {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.stcf-intent-req {
+    background: rgba(241, 196, 15, 0.28);
+    color: #ffe17a;
+    border: 1px solid rgba(241, 196, 15, 0.55);
+}
+
+.stcf-intent-any {
+    background: rgba(231, 76, 60, 0.3);
+    color: #ffb3a7;
+    border: 1px solid rgba(231, 76, 60, 0.6);
+}
+
 /* 血条、蓝条、双特殊计量条 */
 .stcf-bar-group {
     display: flex;

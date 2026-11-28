@@ -15,6 +15,7 @@ import {
     findEquipmentById,
     findSkillById,
     findStatusDefById,
+    formatEnemyIntentSummary,
     getAllUnits,
     getEffectiveStats,
     getUnitAvailableSkills,
@@ -286,6 +287,11 @@ export function buildAuthoringConfigSnapshot(config) {
         };
         if (s.hitRate !== 100) out.hitRate = s.hitRate;
         if (s.critRate) { out.critRate = s.critRate; out.critMultiplier = s.critMultiplier; }
+        if (s.interruptible && s.interruptible !== 'none') out.interruptible = s.interruptible;
+        if (s.canInterrupt) {
+            out.canInterrupt = true;
+            if ((s.interruptChance ?? 100) !== 100) out.interruptChance = s.interruptChance;
+        }
         if (s.selfHpFormula && s.selfHpFormula !== '0') out.selfHpFormula = s.selfHpFormula;
         if (s.selfGaugeChanges && Object.keys(s.selfGaugeChanges).length) out.selfGaugeChanges = s.selfGaugeChanges;
         if (s.targetGaugeChanges && Object.keys(s.targetGaugeChanges).length) out.targetGaugeChanges = s.targetGaugeChanges;
@@ -444,7 +450,9 @@ export function buildAiContextSnapshot(battleState, config) {
             const aliveTag = isAlive(u) ? '' : '[已倒下]';
             const desc = u.description ? `｜简介:${u.description}` : '';
             const gaugesStr = gaugeEntries.map(g => `${g.name}:${u.gauges?.[g.id] ?? g.min}/${g.max}`).join(' ');
-            return `- ${u.name}${aliveTag} HP:${u.hp}/${u.maxHp} MP:${u.mp}/${u.maxMp} 物攻:${eff.atk} 精神:${eff.spi} 物防:${eff.def} 法抗:${eff.mdef}${gaugesStr ? ` ${gaugesStr}` : ''}｜状态:${stText}${desc}`;
+            const intentInfo = u.side === 'enemy' ? formatEnemyIntentSummary(u, battleState, config) : null;
+            const intentNote = intentInfo ? `｜本回合意图:${intentInfo.text}${intentInfo.badge ? `[${intentInfo.badge}]` : ''}` : '';
+            return `- ${u.name}${aliveTag} HP:${u.hp}/${u.maxHp} MP:${u.mp}/${u.maxMp} 物攻:${eff.atk} 精神:${eff.spi} 物防:${eff.def} 法抗:${eff.mdef}${gaugesStr ? ` ${gaugesStr}` : ''}｜状态:${stText}${intentNote}${desc}`;
         };
 
         const phaseNote = battleState.phase === 'victory'
