@@ -558,6 +558,7 @@ function instantiateUnit(tpl, side, config) {
         skillIds: Array.isArray(tpl.skillIds) ? [...tpl.skillIds] : [],
         equipmentIds: Array.isArray(tpl.equipmentIds) ? [...tpl.equipmentIds] : [],
         aiStrategy: ['priority', 'weighted', 'random'].includes(tpl.aiStrategy) ? tpl.aiStrategy : 'priority',
+        aiTargetMode: ['target_first', 'skill_first', 'lowest_hp'].includes(tpl.aiTargetMode) ? tpl.aiTargetMode : 'target_first',
         autoControl: side === 'ally' ? Boolean(tpl.autoControl) : false,
         cooldowns: {}, // { [skillId]: remainingTurns }
         statuses: [],
@@ -1732,9 +1733,24 @@ function preparePlayerTurn(state, config) {
 export function pickAiSkillAndTarget(state, config, actor) {
     const friends = actor.side === 'ally' ? state.allies : state.enemies;
     const foes = actor.side === 'ally' ? state.enemies : state.allies;
+    const aliveFoes = foes.filter(isAlive);
     const actorHpPct = actor.maxHp > 0 ? (actor.hp / actor.maxHp) * 100 : 100;
 
-    const pickTargetForSkill = (sk) => {
+    // v2.2.1：AI 选目标模式
+    // - target_first（默认·分散缠斗）：先随机锁定 1 名存活对手，再只挑针对该目标可释放的技能（避免全员集体集火同 1 个破甲目标）
+    // - lowest_hp（残血斩杀）：先锁定 HP% 最低的存活对手，再挑针对该目标可释放的技能
+    // - skill_first（全图集火·适合 Boss）：先挑优先级最高技能，再全图扫描寻找满足前提的目标
+    const targetMode = actor.aiTargetMode || 'target_first';
+    let lockedFoe = null;
+    if (aliveFoes.length > 0) {
+        if (targetMode === 'target_first') {
+            lockedFoe = aliveFoes[Math.floor(Math.random() * aliveFoes.length)];
+        } else if (targetMode === 'lowest_hp') {
+            lockedFoe = [...aliveFoes].sort((a, b) => (a.hp / Math.max(1, a.maxHp)) - (b.hp / Math.max(1, b.maxHp)))[0];
+        }
+    }
+
+    const pickTargetForSkill = (sk, strictLockedFoe = true) => {
         if (sk.effectType === 'struggle') return null;
         if (getSkillRemainingCooldown(actor, sk.id) > 0) return null;
         if (sk.requiredGaugeId) {
@@ -1770,7 +1786,12 @@ export function pickAiSkillAndTarget(state, config, actor) {
         }
         if (sk.targetType === 'single_enemy') {
             if (actorHpPct > hpLimit) return null;
-            const list = foes.filter(u => isAlive(u) && hasReq(u) && checkSkillPrerequisite(state, config, actor, sk, u.id).ok);
+            if (strictLockedFoe && lockedFoe) {
+                return (hasReq(lockedFoe) && checkSkillPrerequisite(state, config, actor, sk, lockedFoe.id).ok)
+                    ? lockedFoe.id
+                    : null;
+            }
+            const list = aliveFoes.filter(u => hasReq(u) && checkSkillPrerequisite(state, config, actor, sk, u.id).ok);
             return list.length > 0 ? list[Math.floor(Math.random() * list.length)].id : null;
         }
         // all_enemies
@@ -1778,17 +1799,26 @@ export function pickAiSkillAndTarget(state, config, actor) {
         return checkSkillPrerequisite(state, config, actor, sk, '').ok ? '' : null;
     };
 
-    const candidatePairs = getUnitAvailableSkills(actor, config)
+    const unitSkills = getUnitAvailableSkills(actor, config)
         .map(entry => entry.skill)
-        .filter(sk => sk && actor.mp >= sk.mpCost)
-        .map(sk => ({ skill: sk, targetId: pickTargetForSkill(sk) }))
+        .filter(sk => sk && actor.mp >= sk.mpCost);
+
+    let candidatePairs = unitSkills
+        .map(sk => ({ skill: sk, targetId: pickTargetForSkill(sk, true) }))
         .filter(pair => pair.targetId !== null);
+
+    // 兜底：若锁定目标对所有技能都免疫/被前提禁止，则放开全图寻找其他可攻击的合法目标，防止发呆
+    if (candidatePairs.length === 0 && lockedFoe) {
+        candidatePairs = unitSkills
+            .map(sk => ({ skill: sk, targetId: pickTargetForSkill(sk, false) }))
+            .filter(pair => pair.targetId !== null);
+    }
 
     if (candidatePairs.length === 0) {
         const fallbackSkill = (config.skills || []).find(
-            sk => sk.mpCost <= actor.mp && pickTargetForSkill(sk) !== null
+            sk => sk.mpCost <= actor.mp && pickTargetForSkill(sk, false) !== null
         );
-        return fallbackSkill ? { skill: fallbackSkill, targetId: pickTargetForSkill(fallbackSkill) } : null;
+        return fallbackSkill ? { skill: fallbackSkill, targetId: pickTargetForSkill(fallbackSkill, false) } : null;
     }
 
     const strategy = actor.aiStrategy || 'priority';

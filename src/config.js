@@ -220,6 +220,7 @@ function normalizeUnitTemplate(rawUnit, side, index) {
         skillIds: Array.isArray(rawUnit?.skillIds) ? rawUnit.skillIds.map(String) : [],
         equipmentIds: Array.isArray(rawUnit?.equipmentIds) ? rawUnit.equipmentIds.map(String) : [],
         aiStrategy: ['priority', 'weighted', 'random'].includes(rawUnit?.aiStrategy) ? rawUnit.aiStrategy : 'priority',
+        aiTargetMode: ['target_first', 'skill_first', 'lowest_hp'].includes(rawUnit?.aiTargetMode) ? rawUnit.aiTargetMode : 'target_first',
         autoControl: side === 'ally' ? Boolean(rawUnit?.autoControl) : false,
     };
 }

@@ -731,6 +731,7 @@ export async function initSettingsUI(deps) {
             skillIds: cfg.skills[0] ? [cfg.skills[0].id] : [],
             equipmentIds: [],
             aiStrategy: 'priority',
+            aiTargetMode: 'target_first',
             autoControl: false,
         });
         commitChange(true, `${side}:${id}`);
@@ -814,7 +815,14 @@ export async function initSettingsUI(deps) {
                             <label class="stcf-mini-field"><span>法术抗性 MDEF</span><input type="number" min="0" class="text_pole" data-field="mdef" value="${u.mdef ?? 5}"></label>
                             ${initGaugesHtml}
                         </div>
-                        <div class="stcf-grid-2">
+                        <div class="stcf-grid-3">
+                            <label class="stcf-mini-field"><span>AI 选目标模式</span>
+                                <select class="text_pole" data-field="aiTargetMode">
+                                    <option value="target_first" ${u.aiTargetMode !== 'skill_first' && u.aiTargetMode !== 'lowest_hp' ? 'selected' : ''}>分散缠斗(先随机选人再出招·推荐小怪)</option>
+                                    <option value="skill_first" ${u.aiTargetMode === 'skill_first' ? 'selected' : ''}>全图集火(先选大招再找破甲目标·适合Boss)</option>
+                                    <option value="lowest_hp" ${u.aiTargetMode === 'lowest_hp' ? 'selected' : ''}>残血斩杀(优先锁定HP%最低目标)</option>
+                                </select>
+                            </label>
                             <label class="stcf-mini-field"><span>AI 出招策略</span>
                                 <select class="text_pole" data-field="aiStrategy">
                                     <option value="priority" ${u.aiStrategy !== 'weighted' && u.aiStrategy !== 'random' ? 'selected' : ''}>高优先级优先(推荐)</option>
@@ -879,7 +887,7 @@ export async function initSettingsUI(deps) {
             } else if (e.target.dataset.field === 'autoControl') {
                 unit.autoControl = e.target.checked;
                 commitChange();
-            } else if (e.target.dataset.field === 'aiStrategy' || e.target.dataset.field === 'classId') {
+            } else if (e.target.dataset.field === 'aiStrategy' || e.target.dataset.field === 'aiTargetMode' || e.target.dataset.field === 'classId') {
                 unit[e.target.dataset.field] = e.target.value;
                 commitChange(e.target.dataset.field === 'classId');
             } else if (e.target.dataset.unitSkill) {

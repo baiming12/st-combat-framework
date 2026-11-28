@@ -41,6 +41,7 @@ function normalizeEnemyObj(e, idx = 0) {
         skillIds: Array.isArray(e?.skillIds) ? e.skillIds.map(String) : [],
         equipmentIds: Array.isArray(e?.equipmentIds) ? e.equipmentIds.map(String) : [],
         aiStrategy: ['priority', 'weighted', 'random'].includes(e?.aiStrategy) ? e.aiStrategy : 'priority',
+        aiTargetMode: ['target_first', 'skill_first', 'lowest_hp'].includes(e?.aiTargetMode) ? e.aiTargetMode : 'target_first',
     };
 }
 

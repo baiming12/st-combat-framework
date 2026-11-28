@@ -342,7 +342,7 @@ export function buildAuthoringConfigSnapshot(config) {
             id: u.id, enabled: u.enabled, name: u.name, description: u.description,
             level: u.level, classId: u.classId, maxHp: u.maxHp, maxMp: u.maxMp,
             atk: u.atk, spi: u.spi, def: u.def, mdef: u.mdef,
-            skillIds: u.skillIds, equipmentIds: u.equipmentIds, aiStrategy: u.aiStrategy,
+            skillIds: u.skillIds, equipmentIds: u.equipmentIds, aiStrategy: u.aiStrategy, aiTargetMode: u.aiTargetMode || 'target_first',
         };
         if (u.initialGauges && Object.keys(u.initialGauges).length) out.initialGauges = u.initialGauges;
         if (u.freePoints) out.freePoints = u.freePoints;
