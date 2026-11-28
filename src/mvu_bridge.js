@@ -39,13 +39,14 @@ function parseMvuNormalStatuses(rawStatuses, config) {
             statusId: def.id,
             remainingTurns,
             source: 'normal',
+            ...(typeof entry === 'object' && entry.casterId ? { casterId: String(entry.casterId) } : {}),
         });
     }
     return result;
 }
 
 /**
- * 将单位当前全部活跃状态序列化为精简 MVU Zod 数组 [{ id, name, turns, source }]
+ * 将单位当前全部活跃状态序列化为精简 MVU Zod 数组 [{ id, name, turns, source, casterId? }]
  */
 function serializeStatusesForMvu(statuses, config) {
     if (!Array.isArray(statuses)) return [];
@@ -53,12 +54,14 @@ function serializeStatusesForMvu(statuses, config) {
     for (const st of statuses) {
         const def = findStatusDefById(config, st.statusId);
         if (!def) continue;
-        out.push({
+        const item = {
             id: def.id,
             name: def.name,
             turns: Math.max(1, Math.round(Number(st.remainingTurns) || def.duration)),
             source: st.source || 'normal',
-        });
+        };
+        if (st.casterId) item.casterId = st.casterId;
+        out.push(item);
     }
     return out;
 }

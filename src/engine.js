@@ -875,13 +875,25 @@ function tryApplyStatus(target, statusId, chance, config, caster = null) {
     }
 
     const isObjectRestraint = Boolean(def.restraintType && def.restraintSourceMode === 'object');
-    const isCasterRestraint = Boolean(def.restraintType && def.restraintSourceMode !== 'object');
     const objHp = Math.max(1, Math.round(Number(def.restraintObjectHp ?? 50) || 50));
+    const casterId = caster?.id || '';
+    const casterSide = caster?.side || '';
+    const perCaster = def.sourceTrackingMode === 'per_caster';
+    const fixedLabel = def.sourceTrackingMode === 'fixed' ? (def.defaultSourceLabel || '') : '';
 
-    const existing = target.statuses.find(s => s.statusId === statusId && (!s.source || s.source === 'normal'));
+    // per_caster 模式：不同施加者挂的同名 Buff 独立共存、互不覆盖；默认模式按 statusId 合并刷新并更新来源
+    const existing = target.statuses.find(s =>
+        s.statusId === statusId
+        && (!s.source || s.source === 'normal')
+        && (!perCaster || (s.casterId || '') === casterId)
+    );
     if (existing) {
         existing.remainingTurns = Math.max(existing.remainingTurns, def.duration);
-        if (isCasterRestraint && caster?.id) existing.casterId = caster.id;
+        if (casterId) {
+            existing.casterId = casterId;
+            existing.casterSide = casterSide;
+        }
+        if (fixedLabel) existing.sourceLabel = fixedLabel;
         if (isObjectRestraint) {
             existing.objectMaxHp = objHp;
             existing.objectHp = Math.max(existing.objectHp || 0, objHp);
@@ -894,8 +906,12 @@ function tryApplyStatus(target, statusId, chance, config, caster = null) {
         remainingTurns: def.duration,
         source: 'normal',
     };
-    if (isCasterRestraint && caster?.id) {
-        entry.casterId = caster.id;
+    if (casterId) {
+        entry.casterId = casterId;
+        entry.casterSide = casterSide;
+    }
+    if (fixedLabel) {
+        entry.sourceLabel = fixedLabel;
     }
     if (isObjectRestraint) {
         entry.objectMaxHp = objHp;
@@ -1207,11 +1223,111 @@ export function getSkillRemainingCooldown(unit, skillId) {
     return Math.max(0, Math.round(Number(unit?.cooldowns?.[skillId] || 0)));
 }
 
+function comparePrereqNum(actual, operator, expected) {
+    switch (operator) {
+        case '>=': return actual >= expected;
+        case '>':  return actual > expected;
+        case '<=': return actual <= expected;
+        case '<':  return actual < expected;
+        case '==': return actual === expected;
+        default:   return false;
+    }
+}
+
+/**
+ * 判断单位身上是否存在满足「指定状态 + 来源筛选」的活跃状态
+ */
+function unitHasMatchingStatus(state, config, actor, unit, statusId, sourceFilter = 'any') {
+    if (!unit || !Array.isArray(unit.statuses)) return false;
+    return unit.statuses.some(st => {
+        if (!st) return false;
+        if (statusId === '_any_restraint') {
+            const def = findStatusDefById(config, st.statusId);
+            if (!def || !def.restraintType) return false;
+        } else if (statusId && statusId !== '_any') {
+            if (st.statusId !== statusId) return false;
+        }
+        if (sourceFilter === 'self') {
+            return Boolean(actor?.id) && st.casterId === actor.id;
+        }
+        if (sourceFilter === 'other') {
+            return !actor?.id || st.casterId !== actor.id;
+        }
+        if (sourceFilter === 'ally') {
+            const cSide = st.casterSide || (st.casterId ? findUnitById(state, st.casterId)?.side : '');
+            return Boolean(cSide) && cSide === actor?.side;
+        }
+        if (sourceFilter === 'enemy') {
+            const cSide = st.casterSide || (st.casterId ? findUnitById(state, st.casterId)?.side : '');
+            return Boolean(cSide) && cSide !== actor?.side;
+        }
+        return true;
+    });
+}
+
+function formatPrereqConditionText(config, cond) {
+    const subjMap = { target: '目标', self: '自身', any_ally: '任意友方', any_enemy: '任意敌方' };
+    const srcMap = { any: '', self: '自己添加的', other: '别人添加的', ally: '我方添加的', enemy: '敌方添加的' };
+    const subj = subjMap[cond.subject] || '目标';
+    if (cond.type === 'has_status' || cond.type === 'not_has_status') {
+        const stName = cond.statusId === '_any'
+            ? '任意状态'
+            : (cond.statusId === '_any_restraint' ? '任意束缚状态' : (findStatusDefById(config, cond.statusId)?.name || cond.statusId || '指定状态'));
+        const verb = cond.type === 'not_has_status' ? '不可有' : '需持有';
+        return `${subj}${verb}${srcMap[cond.sourceFilter] || ''}「${stName}」`;
+    }
+    if (cond.type === 'gauge') {
+        const gName = config?.gauges?.[cond.gaugeId]?.name || cond.gaugeId || '状态槽';
+        return `${subj}「${gName}」${cond.operator}${cond.value}`;
+    }
+    if (cond.type === 'hp_percent') {
+        return `${subj}HP%${cond.operator}${cond.value}%`;
+    }
+    return '条件';
+}
+
+function evaluateSinglePrereqCondition(state, config, actor, targets, cond) {
+    const friends = actor.side === 'ally' ? (state.allies || []) : (state.enemies || []);
+    const foes = actor.side === 'ally' ? (state.enemies || []) : (state.allies || []);
+    let units = [];
+    if (cond.subject === 'self') units = isAlive(actor) ? [actor] : [];
+    else if (cond.subject === 'any_ally') units = friends.filter(isAlive);
+    else if (cond.subject === 'any_enemy') units = foes.filter(isAlive);
+    else units = targets;
+
+    if (units.length === 0) return false;
+
+    if (cond.type === 'has_status') {
+        return units.some(u => unitHasMatchingStatus(state, config, actor, u, cond.statusId, cond.sourceFilter));
+    }
+    if (cond.type === 'not_has_status') {
+        // 对 target：所有选定目标均不可持有；对 any_ally/any_enemy：存在至少 1 名存活单位不持有（单人即该人不可持有）
+        if (cond.subject === 'target' || cond.subject === 'self') {
+            return units.every(u => !unitHasMatchingStatus(state, config, actor, u, cond.statusId, cond.sourceFilter));
+        }
+        return units.some(u => !unitHasMatchingStatus(state, config, actor, u, cond.statusId, cond.sourceFilter));
+    }
+    if (cond.type === 'gauge') {
+        const gDef = config?.gauges?.[cond.gaugeId];
+        return units.some(u => {
+            const val = u.gauges?.[cond.gaugeId] ?? (gDef?.min ?? 0);
+            return comparePrereqNum(val, cond.operator, Number(cond.value) || 0);
+        });
+    }
+    if (cond.type === 'hp_percent') {
+        return units.some(u => {
+            const pct = u.maxHp > 0 ? (u.hp / u.maxHp) * 100 : 0;
+            return comparePrereqNum(pct, cond.operator, Number(cond.value) || 0);
+        });
+    }
+    return true;
+}
+
 /**
  * 检查技能的前置条件：
- * 1. 冷却回合检查 (cooldown)
- * 2. 自身前置状态检查 (requiredSelfStatusIds：自身持有任一指定状态)
- * 3. 目标前置状态检查 (requiredTargetStatusIds：目标持有任一指定状态)
+ * 1. 束缚/冷却/状态槽门槛检查
+ * 2. 兼容旧版单层前置状态 (requiredSelfStatusIds / requiredTargetStatusIds)
+ * 3. v2.2 多组与/或复合前置条件 (prereqGroupLogic + prereqGroups)，支持按 Buff 添加来源(自己/别人/友方/敌方)与必须有/不可有筛选
  */
 export function checkSkillPrerequisite(state, config, actor, skill, targetId) {
     const restrained = isUnitRestrained(actor, config);
@@ -1227,7 +1343,7 @@ export function checkSkillPrerequisite(state, config, actor, skill, targetId) {
         return { ok: false, reason: `冷却中（剩余 ${cd} 回合）` };
     }
 
-    // v2.0：状态槽前置门槛（例如需要 圣印 >= 3 才能释放大招）
+    // v2.0：状态槽前置门槛
     if (skill?.requiredGaugeId) {
         const reqGDef = config?.gauges?.[skill.requiredGaugeId];
         const curGVal = actor?.gauges?.[skill.requiredGaugeId] ?? (reqGDef?.min ?? 0);
@@ -1259,24 +1375,45 @@ export function checkSkillPrerequisite(state, config, actor, skill, targetId) {
         return { ok: true };
     }
 
+    const targets = resolveTargets(state, actor, skill.targetType, targetId);
+
     const reqIds = Array.isArray(skill?.requiredTargetStatusIds)
         ? skill.requiredTargetStatusIds.filter(Boolean)
         : [];
-    if (reqIds.length === 0) return { ok: true };
-
-    const targets = resolveTargets(state, actor, skill.targetType, targetId);
-    if (targets.length === 0) {
-        return { ok: false, reason: '没有可生效的存活目标。' };
+    if (reqIds.length > 0) {
+        if (targets.length === 0) {
+            return { ok: false, reason: '没有可生效的存活目标。' };
+        }
+        const reqSet = new Set(reqIds);
+        const hasMatch = targets.some(t => (t.statuses || []).some(st => reqSet.has(st.statusId)));
+        if (!hasMatch) {
+            const names = reqIds.map(id => findStatusDefById(config, id)?.name || id).join(' / ');
+            return { ok: false, reason: `需要目标持有【${names}】之一才可释放` };
+        }
     }
 
-    const reqSet = new Set(reqIds);
-    const hasMatch = targets.some(t => (t.statuses || []).some(st => reqSet.has(st.statusId)));
-    if (hasMatch) return { ok: true };
+    // v2.2：多组 与/或 复合前置条件判定
+    const validGroups = (skill?.prereqGroups || []).filter(g => g && Array.isArray(g.conditions) && g.conditions.length > 0);
+    if (validGroups.length > 0) {
+        const groupResults = validGroups.map(g => {
+            const condResults = g.conditions.map(c => evaluateSinglePrereqCondition(state, config, actor, targets, c));
+            const ok = g.logic === 'or' ? condResults.some(Boolean) : condResults.every(Boolean);
+            const sep = g.logic === 'or' ? ' 或 ' : ' 且 ';
+            const desc = `(${g.conditions.map(c => formatPrereqConditionText(config, c)).join(sep)})`;
+            return { ok, desc };
+        });
+        const outerOr = skill.prereqGroupLogic === 'or';
+        const finalOk = outerOr ? groupResults.some(r => r.ok) : groupResults.every(r => r.ok);
+        if (!finalOk) {
+            const outerSep = outerOr ? ' 或 ' : ' 且 ';
+            const failedText = outerOr
+                ? groupResults.map(r => r.desc).join(outerSep)
+                : groupResults.filter(r => !r.ok).map(r => r.desc).join(outerSep);
+            return { ok: false, reason: `不满足前提：${failedText}` };
+        }
+    }
 
-    const names = reqIds
-        .map(id => findStatusDefById(config, id)?.name || id)
-        .join(' / ');
-    return { ok: false, reason: `需要目标持有【${names}】之一才可释放` };
+    return { ok: true };
 }
 
 function performSkill(state, config, actor, skill, targetId) {
@@ -1618,7 +1755,7 @@ export function pickAiSkillAndTarget(state, config, actor) {
 
         if (sk.targetType === 'single_ally') {
             const list = friends
-                .filter(u => isAlive(u) && hasReq(u) && underHp(u))
+                .filter(u => isAlive(u) && hasReq(u) && underHp(u) && checkSkillPrerequisite(state, config, actor, sk, u.id).ok)
                 .sort((a, b) => (a.hp / a.maxHp) - (b.hp / b.maxHp));
             return list[0]?.id || null;
         }
@@ -1629,11 +1766,11 @@ export function pickAiSkillAndTarget(state, config, actor) {
             return checkSkillPrerequisite(state, config, actor, sk, '').ok ? '' : null;
         }
         if (sk.targetType === 'self') {
-            return (hasReq(actor) && actorHpPct <= hpLimit) ? actor.id : null;
+            return (hasReq(actor) && actorHpPct <= hpLimit && checkSkillPrerequisite(state, config, actor, sk, actor.id).ok) ? actor.id : null;
         }
         if (sk.targetType === 'single_enemy') {
             if (actorHpPct > hpLimit) return null;
-            const list = foes.filter(u => isAlive(u) && hasReq(u));
+            const list = foes.filter(u => isAlive(u) && hasReq(u) && checkSkillPrerequisite(state, config, actor, sk, u.id).ok);
             return list.length > 0 ? list[Math.floor(Math.random() * list.length)].id : null;
         }
         // all_enemies

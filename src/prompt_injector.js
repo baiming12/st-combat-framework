@@ -294,6 +294,7 @@ export function buildAuthoringConfigSnapshot(config) {
         if (s.requiredTargetStatusIds?.length) out.requiredTargetStatusIds = s.requiredTargetStatusIds;
         if (s.requiredSelfStatusIds?.length) out.requiredSelfStatusIds = s.requiredSelfStatusIds;
         if (s.requiredGaugeId) { out.requiredGaugeId = s.requiredGaugeId; out.requiredGaugeMin = s.requiredGaugeMin || 0; }
+        if (s.prereqGroups?.length) { out.prereqGroupLogic = s.prereqGroupLogic || 'and'; out.prereqGroups = s.prereqGroups; }
         out.aiPriority = s.aiPriority;
         if (s.aiHpBelowPercent < 100) out.aiHpBelowPercent = s.aiHpBelowPercent;
         return out;
@@ -321,6 +322,8 @@ export function buildAuthoringConfigSnapshot(config) {
             out.restraintObjectHp = st.restraintObjectHp;
             if (st.restraintObjectName) out.restraintObjectName = st.restraintObjectName;
         }
+        if (st.sourceTrackingMode && st.sourceTrackingMode !== 'auto') out.sourceTrackingMode = st.sourceTrackingMode;
+        if (st.defaultSourceLabel) out.defaultSourceLabel = st.defaultSourceLabel;
         return out;
     };
 

@@ -879,6 +879,9 @@ export async function initHudUI(deps) {
                     const casterName = st.casterId ? (findUnitById(state, st.casterId)?.name || st.casterId) : '未知';
                     sourceNote = `${kindText}｜施法者：${casterName}（攻击施法者立即释放）`;
                 }
+            } else if (st.casterId || st.sourceLabel) {
+                const casterName = st.sourceLabel || (findUnitById(state, st.casterId)?.name || st.casterId);
+                sourceNote = `剩余 ${st.remainingTurns} 回合｜来源：${casterName}`;
             }
             const tip = `${def.name}（${sourceNote}）：${def.description || '组合状态效果'}`;
             return `<span class="stcf-status-chip ${extraClass}" title="${escapeHtml(tip)}">${escapeHtml(def.icon || '✨')} ${escapeHtml(def.name)} <b>${badgeText}</b>${objBreakBtn}</span>`;

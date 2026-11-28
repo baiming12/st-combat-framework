@@ -283,7 +283,36 @@ function normalizeIdList(rawArr, legacySingle = '') {
 }
 
 /**
- * 规范化单个技能（v1.6：多附加状态、冷却 CD、自身 HP 卖血/吸血公式、自身前置状态）
+ * 规范化技能的“多组与/或前置条件”(v2.2 新增：支持组间 AND/OR、组内 AND/OR、必须有/不可有、按 Buff 添加来源筛选)
+ */
+function normalizePrereqGroups(rawGroups) {
+    if (!Array.isArray(rawGroups)) return [];
+    const validSubjects = ['target', 'self', 'any_ally', 'any_enemy'];
+    const validTypes = ['has_status', 'not_has_status', 'gauge', 'hp_percent'];
+    const validSources = ['any', 'self', 'other', 'ally', 'enemy'];
+    const validOps = ['>=', '>', '<=', '<', '=='];
+    return rawGroups
+        .filter(g => g && typeof g === 'object')
+        .map(g => ({
+            logic: g.logic === 'or' ? 'or' : 'and',
+            conditions: Array.isArray(g.conditions)
+                ? g.conditions
+                    .filter(c => c && typeof c === 'object')
+                    .map(c => ({
+                        subject: validSubjects.includes(c.subject) ? c.subject : 'target',
+                        type: validTypes.includes(c.type) ? c.type : 'has_status',
+                        statusId: String(c.statusId || '').trim(),
+                        sourceFilter: validSources.includes(c.sourceFilter) ? c.sourceFilter : 'any',
+                        gaugeId: String(c.gaugeId || '').trim(),
+                        operator: validOps.includes(c.operator) ? c.operator : '>=',
+                        value: Number.isFinite(Number(c.value)) ? Number(c.value) : 0,
+                    }))
+                : [],
+        }));
+}
+
+/**
+ * 规范化单个技能（v2.2：多组与/或前置条件、多附加状态、复合效果、命中暴击、状态槽门槛）
  */
 export function normalizeSkill(sk, idx = 0) {
     const defaultId = `skill_${String(idx + 1).padStart(2, '0')}`;
@@ -322,6 +351,8 @@ export function normalizeSkill(sk, idx = 0) {
         requiredSelfStatusIds: normalizeIdList(sk?.requiredSelfStatusIds),
         requiredGaugeId: String(sk?.requiredGaugeId || '').trim(),
         requiredGaugeMin: Number.isFinite(Number(sk?.requiredGaugeMin)) ? Math.round(Number(sk.requiredGaugeMin)) : 0,
+        prereqGroupLogic: sk?.prereqGroupLogic === 'or' ? 'or' : 'and',
+        prereqGroups: normalizePrereqGroups(sk?.prereqGroups),
         hitRate: clamp(sk?.hitRate ?? 100, 1, 100),
         critRate: clamp(sk?.critRate ?? 0, 0, 100),
         critMultiplier: Number.isFinite(Number(sk?.critMultiplier)) && Number(sk.critMultiplier) >= 1
@@ -558,6 +589,9 @@ export function normalizeConfig(rawConfig, defaults) {
             restraintPower: Math.max(0, Number(st?.restraintPower ?? 0) || 0),
             restraintObjectHp: Math.max(1, Math.round(Number(st?.restraintObjectHp ?? 50) || 50)),
             restraintObjectName: String(st?.restraintObjectName || '').trim(),
+            // v2.2 Buff 添加来源追踪设置
+            sourceTrackingMode: ['auto', 'per_caster', 'fixed'].includes(st?.sourceTrackingMode) ? st.sourceTrackingMode : 'auto',
+            defaultSourceLabel: String(st?.defaultSourceLabel || '').trim(),
         };
     });
 
@@ -819,6 +853,8 @@ export function normalizeStatusDef(st, idx = 0) {
         restraintPower: Math.max(0, Number(st?.restraintPower ?? 0) || 0),
         restraintObjectHp: Math.max(1, Math.round(Number(st?.restraintObjectHp ?? 50) || 50)),
         restraintObjectName: String(st?.restraintObjectName || '').trim(),
+        sourceTrackingMode: ['auto', 'per_caster', 'fixed'].includes(st?.sourceTrackingMode) ? st.sourceTrackingMode : 'auto',
+        defaultSourceLabel: String(st?.defaultSourceLabel || '').trim(),
     };
 }
 

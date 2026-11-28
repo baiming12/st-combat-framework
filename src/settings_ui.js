@@ -235,6 +235,11 @@ export async function initSettingsUI(deps) {
             for (const ef of sk.extraEffects || []) {
                 renameGaugeKeyInMap(ef?.gaugeChanges, oldId, newId);
             }
+            for (const pg of sk.prereqGroups || []) {
+                for (const pc of pg?.conditions || []) {
+                    if (pc && pc.gaugeId === oldId) pc.gaugeId = newId;
+                }
+            }
         }
         for (const it of cfg.items || []) {
             renameGaugeKeyInMap(it.targetGaugeChanges, oldId, newId);
@@ -948,6 +953,8 @@ export async function initSettingsUI(deps) {
             requiredSelfStatusIds: [],
             requiredGaugeId: '',
             requiredGaugeMin: 0,
+            prereqGroupLogic: 'and',
+            prereqGroups: [],
             hitRate: 100,
             critRate: 0,
             critMultiplier: 1.5,
@@ -985,10 +992,83 @@ export async function initSettingsUI(deps) {
             const isOpen = openSet.has(cardKey) || forceOpenKey === cardKey;
             const applyList = Array.isArray(sk.applyStatuses) ? sk.applyStatuses : [];
             const extraList = Array.isArray(sk.extraEffects) ? sk.extraEffects : [];
+            const prereqGroups = Array.isArray(sk.prereqGroups) ? sk.prereqGroups : [];
             const reqTgtCount = (sk.requiredTargetStatusIds || []).length;
             const reqSelfCount = (sk.requiredSelfStatusIds || []).length;
             const cdTag = (sk.cooldown || 0) > 0 ? ` · CD${sk.cooldown}` : '';
             const extraTag = extraList.length > 0 ? ` · 🔀+${extraList.length}复合` : '';
+
+            const prereqGroupsHtml = prereqGroups.map((pg, gIdx) => {
+                const condRows = (pg.conditions || []).map((pc, cIdx) => {
+                    const isStatusType = pc.type === 'has_status' || pc.type === 'not_has_status';
+                    const stOpts = [
+                        `<option value="_any" ${pc.statusId === '_any' ? 'selected' : ''}>任意状态</option>`,
+                        `<option value="_any_restraint" ${pc.statusId === '_any_restraint' ? 'selected' : ''}>⛓️任意束缚状态</option>`,
+                        ...(cfg.statuses || []).map(st => `<option value="${escapeHtml(st.id)}" ${pc.statusId === st.id ? 'selected' : ''}>${escapeHtml(st.icon)} ${escapeHtml(st.name)}</option>`),
+                    ].join('');
+                    const detailHtml = isStatusType ? `
+                        <select class="text_pole" data-pc-field="statusId">${stOpts}</select>
+                        <select class="text_pole" data-pc-field="sourceFilter" title="筛选该 Buff 的添加来源">
+                            <option value="any" ${pc.sourceFilter === 'any' ? 'selected' : ''}>任意来源</option>
+                            <option value="self" ${pc.sourceFilter === 'self' ? 'selected' : ''}>仅自己添加的</option>
+                            <option value="other" ${pc.sourceFilter === 'other' ? 'selected' : ''}>仅别人添加的</option>
+                            <option value="ally" ${pc.sourceFilter === 'ally' ? 'selected' : ''}>我方添加的</option>
+                            <option value="enemy" ${pc.sourceFilter === 'enemy' ? 'selected' : ''}>敌方添加的</option>
+                        </select>
+                    ` : `
+                        ${pc.type === 'gauge' ? `
+                            <select class="text_pole" data-pc-field="gaugeId">
+                                ${gaugeEntries.map(g => `<option value="${escapeHtml(g.id)}" ${pc.gaugeId === g.id ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('')}
+                            </select>
+                        ` : '<span class="stcf-muted" style="align-self:center;">HP%</span>'}
+                        <select class="text_pole" data-pc-field="operator" style="max-width:64px;">
+                            <option value=">=" ${pc.operator === '>=' ? 'selected' : ''}>&gt;=</option>
+                            <option value=">" ${pc.operator === '>' ? 'selected' : ''}>&gt;</option>
+                            <option value="<=" ${pc.operator === '<=' ? 'selected' : ''}>&lt;=</option>
+                            <option value="<" ${pc.operator === '<' ? 'selected' : ''}>&lt;</option>
+                            <option value="==" ${pc.operator === '==' ? 'selected' : ''}>==</option>
+                        </select>
+                        <input type="number" class="text_pole stcf-pct-input" data-pc-field="value" value="${pc.value ?? 0}">
+                    `;
+                    return `
+                        <div class="stcf-apply-row" data-pc-idx="${cIdx}" style="flex-wrap:wrap;margin-bottom:4px;">
+                            <select class="text_pole" data-pc-field="subject" style="max-width:92px;">
+                                <option value="target" ${pc.subject === 'target' ? 'selected' : ''}>目标</option>
+                                <option value="self" ${pc.subject === 'self' ? 'selected' : ''}>自身</option>
+                                <option value="any_ally" ${pc.subject === 'any_ally' ? 'selected' : ''}>任意友方</option>
+                                <option value="any_enemy" ${pc.subject === 'any_enemy' ? 'selected' : ''}>任意敌方</option>
+                            </select>
+                            <select class="text_pole" data-pc-field="type" style="max-width:112px;">
+                                <option value="has_status" ${pc.type === 'has_status' ? 'selected' : ''}>必须有状态</option>
+                                <option value="not_has_status" ${pc.type === 'not_has_status' ? 'selected' : ''}>不可有状态</option>
+                                <option value="gauge" ${pc.type === 'gauge' ? 'selected' : ''}>状态槽满足</option>
+                                <option value="hp_percent" ${pc.type === 'hp_percent' ? 'selected' : ''}>HP%满足</option>
+                            </select>
+                            ${detailHtml}
+                            <button type="button" class="stcf-del-btn" data-pg-action="del_cond" title="删除该条件">✖</button>
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="stcf-sub-card" data-pg-idx="${gIdx}" style="padding:6px;border:1px solid rgba(255,255,255,0.14);border-radius:6px;margin-bottom:6px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+                            <div style="display:flex;align-items:center;gap:6px;">
+                                <strong>条件组 #${gIdx + 1}</strong>
+                                <select class="text_pole" data-pg-logic="1" style="width:auto;padding:2px 6px;">
+                                    <option value="and" ${pg.logic !== 'or' ? 'selected' : ''}>组内全部满足 (且 AND)</option>
+                                    <option value="or" ${pg.logic === 'or' ? 'selected' : ''}>组内满足任一 (或 OR)</option>
+                                </select>
+                            </div>
+                            <div style="display:flex;gap:4px;">
+                                <button type="button" class="menu_button stcf-sm-btn" data-pg-action="add_cond">➕ 加条件</button>
+                                <button type="button" class="stcf-del-btn" data-pg-action="del_group" title="删除条件组">🗑️</button>
+                            </div>
+                        </div>
+                        ${condRows || '<div class="stcf-muted">请点击「➕ 加条件」添加前提条款</div>'}
+                    </div>
+                `;
+            }).join('');
 
             const extraRowsHtml = extraList.map((ef, eIdx) => `
                 <div class="stcf-sub-card" data-extra-index="${eIdx}" style="padding:6px;border:1px solid rgba(255,255,255,0.12);border-radius:6px;margin-bottom:6px;">
@@ -1140,10 +1220,24 @@ export async function initSettingsUI(deps) {
                             </div>
                         </details>
 
-                        <!-- 折叠子区：目标与自身前置状态 / 状态槽门槛 -->
+                        <!-- 折叠子区：目标与自身前置状态 / 状态槽门槛 / 高级与或组合前提 -->
                         <details class="stcf-sub-fold">
-                            <summary>🔒 释放前置条件（目标状态 ${reqTgtCount} ｜ 自身状态 ${reqSelfCount}${sk.requiredGaugeId ? ` ｜ 槽门槛` : ''}）</summary>
+                            <summary>🔒 释放前置条件（目标 ${reqTgtCount} ｜ 自身 ${reqSelfCount}${sk.requiredGaugeId ? ' ｜ 槽门槛' : ''}${prereqGroups.length ? ` ｜ 🔀高级${prereqGroups.length}组` : ''}）</summary>
                             <div class="stcf-sub-body">
+                                <div style="padding:6px;border:1px solid rgba(94,163,255,0.28);border-radius:6px;margin-bottom:8px;background:rgba(94,163,255,0.06);">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+                                        <span style="font-weight:700;">🔀 高级组合前提（多组 与/或 逻辑 + 按 Buff 添加来源筛选）</span>
+                                        <div style="display:flex;align-items:center;gap:4px;">
+                                            <select class="text_pole" data-field="prereqGroupLogic" style="width:auto;padding:2px 6px;" title="多个条件组之间的逻辑关系">
+                                                <option value="and" ${sk.prereqGroupLogic !== 'or' ? 'selected' : ''}>组间：全部满足 (AND)</option>
+                                                <option value="or" ${sk.prereqGroupLogic === 'or' ? 'selected' : ''}>组间：满足任一组 (OR)</option>
+                                            </select>
+                                            <button type="button" class="menu_button stcf-sm-btn" data-pg-action="add_group">➕ 新增条件组</button>
+                                        </div>
+                                    </div>
+                                    ${prereqGroupsHtml || '<div class="stcf-muted">可组合「目标需有自己添加的某 Buff」「目标不可有别人添加的某 Buff」「自身 HP%/状态槽」等任意 与/或 组合。</div>'}
+                                </div>
+
                                 <div class="stcf-grid-2" style="margin-bottom:8px;">
                                     <label class="stcf-mini-field"><span>前置状态槽门槛（可选）</span>
                                         <select class="text_pole" data-field="requiredGaugeId">
@@ -1172,6 +1266,13 @@ export async function initSettingsUI(deps) {
         if (!card) return;
         const skill = deps.getConfig().skills[Number(card.dataset.index)];
         if (!skill) return;
+        if (e.target.dataset.pcField === 'value') {
+            const gEl = e.target.closest('[data-pg-idx]');
+            const cEl = e.target.closest('[data-pc-idx]');
+            const pc = skill.prereqGroups?.[Number(gEl?.dataset.pgIdx)]?.conditions?.[Number(cEl?.dataset.pcIdx)];
+            if (pc) { pc.value = Number(e.target.value) || 0; commitChange(); }
+            return;
+        }
         if (e.target.dataset.applyField === 'chance') {
             const row = e.target.closest('.stcf-apply-row');
             const ap = skill.applyStatuses[Number(row.dataset.applyIndex)];
@@ -1226,6 +1327,27 @@ export async function initSettingsUI(deps) {
         const skill = deps.getConfig().skills[Number(card.dataset.index)];
         if (!skill) return;
 
+        if (e.target.dataset.pgLogic) {
+            const gEl = e.target.closest('[data-pg-idx]');
+            const pg = skill.prereqGroups?.[Number(gEl?.dataset.pgIdx)];
+            if (pg) { pg.logic = e.target.value === 'or' ? 'or' : 'and'; commitChange(); }
+            return;
+        }
+        if (e.target.dataset.pcField) {
+            const gEl = e.target.closest('[data-pg-idx]');
+            const cEl = e.target.closest('[data-pc-idx]');
+            const pc = skill.prereqGroups?.[Number(gEl?.dataset.pgIdx)]?.conditions?.[Number(cEl?.dataset.pcIdx)];
+            if (pc) {
+                const f = e.target.dataset.pcField;
+                pc[f] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
+                if (f === 'type') {
+                    if (pc.type === 'gauge' && !pc.gaugeId) pc.gaugeId = getGaugeEntries(deps.getConfig())[0]?.id || 'gauge_a';
+                    if ((pc.type === 'has_status' || pc.type === 'not_has_status') && !pc.statusId) pc.statusId = deps.getConfig().statuses[0]?.id || '_any';
+                }
+                commitChange(f === 'type');
+            }
+            return;
+        }
         if (e.target.dataset.applyField) {
             const row = e.target.closest('.stcf-apply-row');
             const ap = skill.applyStatuses[Number(row.dataset.applyIndex)];
@@ -1283,6 +1405,49 @@ export async function initSettingsUI(deps) {
             clone.name = `${skill.name}(副本)`;
             cfg.skills.splice(idx + 1, 0, clone);
             commitChange(true, `sk:${clone.id}`);
+        } else if (e.target.closest('[data-pg-action="add_group"]')) {
+            if (!Array.isArray(skill.prereqGroups)) skill.prereqGroups = [];
+            skill.prereqGroups.push({
+                logic: 'and',
+                conditions: [{
+                    subject: 'target',
+                    type: 'has_status',
+                    statusId: deps.getConfig().statuses[0]?.id || '_any',
+                    sourceFilter: 'self',
+                    gaugeId: '',
+                    operator: '>=',
+                    value: 0,
+                }],
+            });
+            commitChange(true);
+        } else if (e.target.closest('[data-pg-action="del_group"]')) {
+            const gEl = e.target.closest('[data-pg-idx]');
+            skill.prereqGroups.splice(Number(gEl.dataset.pgIdx), 1);
+            commitChange(true);
+        } else if (e.target.closest('[data-pg-action="add_cond"]')) {
+            const gEl = e.target.closest('[data-pg-idx]');
+            const pg = skill.prereqGroups?.[Number(gEl?.dataset.pgIdx)];
+            if (pg) {
+                if (!Array.isArray(pg.conditions)) pg.conditions = [];
+                pg.conditions.push({
+                    subject: 'target',
+                    type: 'has_status',
+                    statusId: deps.getConfig().statuses[0]?.id || '_any',
+                    sourceFilter: 'any',
+                    gaugeId: '',
+                    operator: '>=',
+                    value: 0,
+                });
+                commitChange(true);
+            }
+        } else if (e.target.closest('[data-pg-action="del_cond"]')) {
+            const gEl = e.target.closest('[data-pg-idx]');
+            const cEl = e.target.closest('[data-pc-idx]');
+            const pg = skill.prereqGroups?.[Number(gEl?.dataset.pgIdx)];
+            if (pg && Array.isArray(pg.conditions)) {
+                pg.conditions.splice(Number(cEl.dataset.pcIdx), 1);
+                commitChange(true);
+            }
         } else if (e.target.closest('[data-extra-action="add"]')) {
             if (!Array.isArray(skill.extraEffects)) skill.extraEffects = [];
             skill.extraEffects.push({
@@ -1594,6 +1759,8 @@ export async function initSettingsUI(deps) {
             restraintPower: 0,
             restraintObjectHp: 50,
             restraintObjectName: '',
+            sourceTrackingMode: 'auto',
+            defaultSourceLabel: '',
         });
         commitChange(true, `st:${id}`);
     });
@@ -1672,6 +1839,18 @@ export async function initSettingsUI(deps) {
                             <label class="stcf-mini-field"><span>法抗倍率</span><input type="number" step="0.1" min="0.1" class="text_pole" data-field="mdefMultiplier" value="${st.mdefMultiplier ?? 1}"></label>
                             <label class="stcf-mini-field"><span>承伤倍率(0.7减伤/1.3易伤)</span><input type="number" step="0.1" min="0" class="text_pole" data-field="damageTakenMultiplier" value="${st.damageTakenMultiplier ?? 1}"></label>
                             <label class="stcf-mini-field"><span>持续回合数</span><input type="number" min="1" class="text_pole" data-field="duration" value="${st.duration}"></label>
+                        </div>
+                        <div class="stcf-grid-2">
+                            <label class="stcf-mini-field"><span>Buff 添加来源追踪（配合技能来源前提）</span>
+                                <select class="text_pole" data-field="sourceTrackingMode">
+                                    <option value="auto" ${st.sourceTrackingMode !== 'per_caster' && st.sourceTrackingMode !== 'fixed' ? 'selected' : ''}>自动记录施法者（同名刷新）</option>
+                                    <option value="per_caster" ${st.sourceTrackingMode === 'per_caster' ? 'selected' : ''}>按施法者独立共存（不同人挂的互不覆盖）</option>
+                                    <option value="fixed" ${st.sourceTrackingMode === 'fixed' ? 'selected' : ''}>固定自定义来源标签</option>
+                                </select>
+                            </label>
+                            <label class="stcf-mini-field"><span>自定义来源标签（可选）</span>
+                                <input type="text" class="text_pole" data-field="defaultSourceLabel" value="${escapeHtml(st.defaultSourceLabel || '')}" placeholder="留空自动记录施法者名">
+                            </label>
                         </div>
                         <details class="stcf-sub-fold">
                             <summary>📊 状态槽增减倍率（Buff 加成 · 已配 ${gmList.length} 项）</summary>
