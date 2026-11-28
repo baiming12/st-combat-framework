@@ -1040,6 +1040,10 @@ export async function initSettingsUI(deps) {
                     `;
                     return `
                         <div class="stcf-apply-row" data-pc-idx="${cIdx}" style="flex-wrap:wrap;margin-bottom:4px;">
+                            <label class="stcf-inline-check" title="勾选后对此单条条件取反（非 NOT）" style="margin-right:2px;">
+                                <input type="checkbox" data-pc-field="negate" ${pc.negate ? 'checked' : ''}>
+                                <strong>非!</strong>
+                            </label>
                             <select class="text_pole" data-pc-field="subject" style="max-width:92px;">
                                 <option value="target" ${pc.subject === 'target' ? 'selected' : ''}>目标</option>
                                 <option value="self" ${pc.subject === 'self' ? 'selected' : ''}>自身</option>
@@ -1064,8 +1068,10 @@ export async function initSettingsUI(deps) {
                             <div style="display:flex;align-items:center;gap:6px;">
                                 <strong>条件组 #${gIdx + 1}</strong>
                                 <select class="text_pole" data-pg-logic="1" style="width:auto;padding:2px 6px;">
-                                    <option value="and" ${pg.logic !== 'or' ? 'selected' : ''}>组内全部满足 (且 AND)</option>
-                                    <option value="or" ${pg.logic === 'or' ? 'selected' : ''}>组内满足任一 (或 OR)</option>
+                                    <option value="and" ${pg.logic === 'and' || !pg.logic ? 'selected' : ''}>组内：全部满足 (且 AND)</option>
+                                    <option value="or" ${pg.logic === 'or' ? 'selected' : ''}>组内：满足任一 (或 OR)</option>
+                                    <option value="nor" ${pg.logic === 'nor' ? 'selected' : ''}>组内：全都不满足 (非 NOR)</option>
+                                    <option value="nand" ${pg.logic === 'nand' ? 'selected' : ''}>组内：不可全部满足 (非且 NAND)</option>
                                 </select>
                             </div>
                             <div style="display:flex;gap:4px;">
@@ -1234,16 +1240,18 @@ export async function initSettingsUI(deps) {
                             <div class="stcf-sub-body">
                                 <div style="padding:6px;border:1px solid rgba(94,163,255,0.28);border-radius:6px;margin-bottom:8px;background:rgba(94,163,255,0.06);">
                                     <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
-                                        <span style="font-weight:700;">🔀 高级组合前提（多组 与/或 逻辑 + 按 Buff 添加来源筛选）</span>
+                                        <span style="font-weight:700;">🔀 高级组合前提（多组 与/或/非 逻辑 + 按 Buff 添加来源筛选）</span>
                                         <div style="display:flex;align-items:center;gap:4px;">
                                             <select class="text_pole" data-field="prereqGroupLogic" style="width:auto;padding:2px 6px;" title="多个条件组之间的逻辑关系">
-                                                <option value="and" ${sk.prereqGroupLogic !== 'or' ? 'selected' : ''}>组间：全部满足 (AND)</option>
+                                                <option value="and" ${sk.prereqGroupLogic === 'and' || !sk.prereqGroupLogic ? 'selected' : ''}>组间：全部满足 (AND)</option>
                                                 <option value="or" ${sk.prereqGroupLogic === 'or' ? 'selected' : ''}>组间：满足任一组 (OR)</option>
+                                                <option value="nor" ${sk.prereqGroupLogic === 'nor' ? 'selected' : ''}>组间：全都不满足 (非 NOR)</option>
+                                                <option value="nand" ${sk.prereqGroupLogic === 'nand' ? 'selected' : ''}>组间：不可全部满足 (非且 NAND)</option>
                                             </select>
                                             <button type="button" class="menu_button stcf-sm-btn" data-pg-action="add_group">➕ 新增条件组</button>
                                         </div>
                                     </div>
-                                    ${prereqGroupsHtml || '<div class="stcf-muted">可组合「目标需有自己添加的某 Buff」「目标不可有别人添加的某 Buff」「自身 HP%/状态槽」等任意 与/或 组合。</div>'}
+                                    ${prereqGroupsHtml || '<div class="stcf-muted">可组合「目标需有自己添加的某 Buff」「目标不可有别人添加的某 Buff」「自身 HP%/状态槽」等任意 与/或/非（单条取反 / NOR / NAND）组合。</div>'}
                                 </div>
 
                                 <div class="stcf-grid-2" style="margin-bottom:8px;">
@@ -1338,7 +1346,7 @@ export async function initSettingsUI(deps) {
         if (e.target.dataset.pgLogic) {
             const gEl = e.target.closest('[data-pg-idx]');
             const pg = skill.prereqGroups?.[Number(gEl?.dataset.pgIdx)];
-            if (pg) { pg.logic = e.target.value === 'or' ? 'or' : 'and'; commitChange(); }
+            if (pg) { pg.logic = ['and', 'or', 'nor', 'nand'].includes(e.target.value) ? e.target.value : 'and'; commitChange(); }
             return;
         }
         if (e.target.dataset.pcField) {
@@ -1347,7 +1355,9 @@ export async function initSettingsUI(deps) {
             const pc = skill.prereqGroups?.[Number(gEl?.dataset.pgIdx)]?.conditions?.[Number(cEl?.dataset.pcIdx)];
             if (pc) {
                 const f = e.target.dataset.pcField;
-                pc[f] = e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value;
+                pc[f] = e.target.type === 'checkbox'
+                    ? e.target.checked
+                    : (e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value);
                 if (f === 'type') {
                     if (pc.type === 'gauge' && !pc.gaugeId) pc.gaugeId = getGaugeEntries(deps.getConfig())[0]?.id || 'gauge_a';
                     if ((pc.type === 'has_status' || pc.type === 'not_has_status') && !pc.statusId) pc.statusId = deps.getConfig().statuses[0]?.id || '_any';

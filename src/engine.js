@@ -1284,21 +1284,29 @@ function formatPrereqConditionText(config, cond) {
     const subjMap = { target: '目标', self: '自身', any_ally: '任意友方', any_enemy: '任意敌方' };
     const srcMap = { any: '', self: '自己添加的', other: '别人添加的', ally: '我方添加的', enemy: '敌方添加的' };
     const subj = subjMap[cond.subject] || '目标';
+    const negPrefix = cond.negate ? '非(' : '';
+    const negSuffix = cond.negate ? ')' : '';
+    let core = '条件';
     if (cond.type === 'has_status' || cond.type === 'not_has_status') {
         const stName = cond.statusId === '_any'
             ? '任意状态'
             : (cond.statusId === '_any_restraint' ? '任意束缚状态' : (findStatusDefById(config, cond.statusId)?.name || cond.statusId || '指定状态'));
         const verb = cond.type === 'not_has_status' ? '不可有' : '需持有';
-        return `${subj}${verb}${srcMap[cond.sourceFilter] || ''}「${stName}」`;
-    }
-    if (cond.type === 'gauge') {
+        core = `${subj}${verb}${srcMap[cond.sourceFilter] || ''}「${stName}」`;
+    } else if (cond.type === 'gauge') {
         const gName = config?.gauges?.[cond.gaugeId]?.name || cond.gaugeId || '状态槽';
-        return `${subj}「${gName}」${cond.operator}${cond.value}`;
+        core = `${subj}「${gName}」${cond.operator}${cond.value}`;
+    } else if (cond.type === 'hp_percent') {
+        core = `${subj}HP%${cond.operator}${cond.value}%`;
     }
-    if (cond.type === 'hp_percent') {
-        return `${subj}HP%${cond.operator}${cond.value}%`;
-    }
-    return '条件';
+    return `${negPrefix}${core}${negSuffix}`;
+}
+
+function evalLogicArray(bools, logic) {
+    if (logic === 'or') return bools.some(Boolean);
+    if (logic === 'nor') return !bools.some(Boolean);
+    if (logic === 'nand') return !bools.every(Boolean);
+    return bools.every(Boolean);
 }
 
 function evaluateSinglePrereqCondition(state, config, actor, targets, cond) {
@@ -1312,30 +1320,28 @@ function evaluateSinglePrereqCondition(state, config, actor, targets, cond) {
 
     if (units.length === 0) return false;
 
+    let res = true;
     if (cond.type === 'has_status') {
-        return units.some(u => unitHasMatchingStatus(state, config, actor, u, cond.statusId, cond.sourceFilter));
-    }
-    if (cond.type === 'not_has_status') {
-        // 对 target：所有选定目标均不可持有；对 any_ally/any_enemy：存在至少 1 名存活单位不持有（单人即该人不可持有）
+        res = units.some(u => unitHasMatchingStatus(state, config, actor, u, cond.statusId, cond.sourceFilter));
+    } else if (cond.type === 'not_has_status') {
         if (cond.subject === 'target' || cond.subject === 'self') {
-            return units.every(u => !unitHasMatchingStatus(state, config, actor, u, cond.statusId, cond.sourceFilter));
+            res = units.every(u => !unitHasMatchingStatus(state, config, actor, u, cond.statusId, cond.sourceFilter));
+        } else {
+            res = units.some(u => !unitHasMatchingStatus(state, config, actor, u, cond.statusId, cond.sourceFilter));
         }
-        return units.some(u => !unitHasMatchingStatus(state, config, actor, u, cond.statusId, cond.sourceFilter));
-    }
-    if (cond.type === 'gauge') {
+    } else if (cond.type === 'gauge') {
         const gDef = config?.gauges?.[cond.gaugeId];
-        return units.some(u => {
+        res = units.some(u => {
             const val = u.gauges?.[cond.gaugeId] ?? (gDef?.min ?? 0);
             return comparePrereqNum(val, cond.operator, Number(cond.value) || 0);
         });
-    }
-    if (cond.type === 'hp_percent') {
-        return units.some(u => {
+    } else if (cond.type === 'hp_percent') {
+        res = units.some(u => {
             const pct = u.maxHp > 0 ? (u.hp / u.maxHp) * 100 : 0;
             return comparePrereqNum(pct, cond.operator, Number(cond.value) || 0);
         });
     }
-    return true;
+    return cond.negate ? !res : res;
 }
 
 /**
@@ -1407,24 +1413,27 @@ export function checkSkillPrerequisite(state, config, actor, skill, targetId) {
         }
     }
 
-    // v2.2：多组 与/或 复合前置条件判定
+    // v2.2/v2.2.3：多组 与/或/非 复合前置条件判定（支持 AND / OR / NOR / NAND 与单条取反）
     const validGroups = (skill?.prereqGroups || []).filter(g => g && Array.isArray(g.conditions) && g.conditions.length > 0);
     if (validGroups.length > 0) {
         const groupResults = validGroups.map(g => {
             const condResults = g.conditions.map(c => evaluateSinglePrereqCondition(state, config, actor, targets, c));
-            const ok = g.logic === 'or' ? condResults.some(Boolean) : condResults.every(Boolean);
-            const sep = g.logic === 'or' ? ' 或 ' : ' 且 ';
-            const desc = `(${g.conditions.map(c => formatPrereqConditionText(config, c)).join(sep)})`;
+            const gLogic = g.logic || 'and';
+            const ok = evalLogicArray(condResults, gLogic);
+            const sep = (gLogic === 'or' || gLogic === 'nor') ? ' 或 ' : ' 且 ';
+            const prefix = gLogic === 'nor' ? '均不可' : (gLogic === 'nand' ? '不可同时' : '');
+            const desc = `${prefix}(${g.conditions.map(c => formatPrereqConditionText(config, c)).join(sep)})`;
             return { ok, desc };
         });
-        const outerOr = skill.prereqGroupLogic === 'or';
-        const finalOk = outerOr ? groupResults.some(r => r.ok) : groupResults.every(r => r.ok);
+        const outerLogic = skill.prereqGroupLogic || 'and';
+        const finalOk = evalLogicArray(groupResults.map(r => r.ok), outerLogic);
         if (!finalOk) {
-            const outerSep = outerOr ? ' 或 ' : ' 且 ';
-            const failedText = outerOr
-                ? groupResults.map(r => r.desc).join(outerSep)
-                : groupResults.filter(r => !r.ok).map(r => r.desc).join(outerSep);
-            return { ok: false, reason: `不满足前提：${failedText}` };
+            const outerSep = (outerLogic === 'or' || outerLogic === 'nor') ? ' 或 ' : ' 且 ';
+            const outerPrefix = outerLogic === 'nor' ? '均不可满足：' : (outerLogic === 'nand' ? '不可同时满足：' : '');
+            const failedText = outerLogic === 'and'
+                ? groupResults.filter(r => !r.ok).map(r => r.desc).join(outerSep)
+                : groupResults.map(r => r.desc).join(outerSep);
+            return { ok: false, reason: `不满足前提：${outerPrefix}${failedText}` };
         }
     }
 

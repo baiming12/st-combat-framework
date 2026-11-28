@@ -292,14 +292,16 @@ function normalizePrereqGroups(rawGroups) {
     const validTypes = ['has_status', 'not_has_status', 'gauge', 'hp_percent'];
     const validSources = ['any', 'self', 'other', 'ally', 'enemy'];
     const validOps = ['>=', '>', '<=', '<', '=='];
+    const validLogics = ['and', 'or', 'nor', 'nand'];
     return rawGroups
         .filter(g => g && typeof g === 'object')
         .map(g => ({
-            logic: g.logic === 'or' ? 'or' : 'and',
+            logic: validLogics.includes(g.logic) ? g.logic : 'and',
             conditions: Array.isArray(g.conditions)
                 ? g.conditions
                     .filter(c => c && typeof c === 'object')
                     .map(c => ({
+                        negate: Boolean(c.negate),
                         subject: validSubjects.includes(c.subject) ? c.subject : 'target',
                         type: validTypes.includes(c.type) ? c.type : 'has_status',
                         statusId: String(c.statusId || '').trim(),
@@ -352,7 +354,7 @@ export function normalizeSkill(sk, idx = 0) {
         requiredSelfStatusIds: normalizeIdList(sk?.requiredSelfStatusIds),
         requiredGaugeId: String(sk?.requiredGaugeId || '').trim(),
         requiredGaugeMin: Number.isFinite(Number(sk?.requiredGaugeMin)) ? Math.round(Number(sk.requiredGaugeMin)) : 0,
-        prereqGroupLogic: sk?.prereqGroupLogic === 'or' ? 'or' : 'and',
+        prereqGroupLogic: ['and', 'or', 'nor', 'nand'].includes(sk?.prereqGroupLogic) ? sk.prereqGroupLogic : 'and',
         prereqGroups: normalizePrereqGroups(sk?.prereqGroups),
         hitRate: clamp(sk?.hitRate ?? 100, 1, 100),
         critRate: clamp(sk?.critRate ?? 0, 0, 100),
