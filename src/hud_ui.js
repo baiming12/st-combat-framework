@@ -28,6 +28,7 @@ import {
     findEquipmentById,
     findItemById,
     findSkillById,
+    findSkillTypeById,
     findStatusDefById,
     findUnitById,
     formatCombatLogOutput,
@@ -1055,14 +1056,16 @@ export async function initHudUI(deps) {
                     const preCheck = actor ? checkSkillPrerequisite(state, config, actor, sk, state.selectedTargetId) : { ok: true };
                     const disabled = !canAct || lackMp || !preCheck.ok;
                     const typeBadge = TARGET_TYPE_BADGES[sk.targetType] || '';
+                    const stDef = sk.skillType ? findSkillTypeById(config, sk.skillType) : null;
+                    const customTypeBadge = sk.skillType ? ` · ${stDef ? `${stDef.icon || ''}${stDef.name}` : sk.skillType}` : '';
                     const intTag = sk.canInterrupt ? ` · 💥打断${(sk.interruptChance ?? 100) < 100 ? `${sk.interruptChance}%` : ''}` : '';
                     const srcTag = fromEquipmentName ? ` · 🛡️${fromEquipmentName}` : (fromClassName ? ` · 🎓${fromClassName}` : '');
                     const lockTag = remCd > 0 ? ` · ⏳CD ${remCd}T` : (!preCheck.ok ? ' · 🔒需前置' : '');
-                    const tip = `${sk.description || sk.name}｜消耗 ${sk.mpCost} MP${sk.cooldown ? `｜冷却 ${sk.cooldown}T` : ''}${sk.canInterrupt ? `｜💥可打断敌方蓄力/可打断意图(${sk.interruptChance ?? 100}%)` : ''}｜公式：${sk.formula}${!preCheck.ok ? `｜⚠️ ${preCheck.reason}` : ''}`;
+                    const tip = `${sk.description || sk.name}${sk.skillType ? `｜类型：${stDef ? `${stDef.icon || ''}${stDef.name}` : sk.skillType}` : ''}｜消耗 ${sk.mpCost} MP${sk.cooldown ? `｜冷却 ${sk.cooldown}T` : ''}${sk.canInterrupt ? `｜💥可打断敌方蓄力/可打断意图(${sk.interruptChance ?? 100}%)` : ''}｜公式：${sk.formula}${!preCheck.ok ? `｜⚠️ ${preCheck.reason}` : ''}`;
                     return `
                         <button type="button" class="stcf-skill-btn" data-skill-id="${escapeHtml(sk.id)}" ${disabled ? 'disabled' : ''} title="${escapeHtml(tip)}">
                             <span class="stcf-skill-name">${remCd > 0 ? '⏳ ' : (!preCheck.ok ? '🔒 ' : '')}${escapeHtml(sk.name)}</span>
-                            <span class="stcf-skill-meta">${typeBadge}${sk.mpCost > 0 ? ` · ${sk.mpCost}MP` : ''}${intTag}${escapeHtml(srcTag)}${lockTag}</span>
+                            <span class="stcf-skill-meta">${typeBadge}${escapeHtml(customTypeBadge)}${sk.mpCost > 0 ? ` · ${sk.mpCost}MP` : ''}${intTag}${escapeHtml(srcTag)}${lockTag}</span>
                         </button>
                     `;
                 }).join('') + defendBtnHtml;

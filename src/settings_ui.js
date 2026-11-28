@@ -943,6 +943,7 @@ export async function initSettingsUI(deps) {
             id,
             worldview: skillFilterWv !== 'all' ? skillFilterWv : '西幻',
             poolType: skillFilterPool !== 'all' ? skillFilterPool : 'universal',
+            skillType: '',
             name: `新技能_${cfg.skills.length + 1}`,
             description: '自定义技能说明',
             mpCost: 10,
@@ -968,10 +969,84 @@ export async function initSettingsUI(deps) {
             hitRate: 100,
             critRate: 0,
             critMultiplier: 1.5,
+            interruptible: 'none',
+            canInterrupt: false,
+            interruptChance: 100,
             aiPriority: 10,
             aiHpBelowPercent: 100,
         });
         commitChange(true, `sk:${id}`);
+    });
+
+    // =========================================================================
+    // 二点九、自定义技能类型库编辑器（v2.3.1：支持用户与写卡助手自由增删）
+    // =========================================================================
+    const elSkillTypesEditor = container.querySelector('#stcf-skill-types-editor');
+    container.querySelector('#stcf-btn-add-skill-type')?.addEventListener('click', () => {
+        const cfg = deps.getConfig();
+        if (!Array.isArray(cfg.skillTypes)) cfg.skillTypes = [];
+        const id = makeUniqueId('stype', cfg.skillTypes);
+        cfg.skillTypes.push({
+            id,
+            name: `自定义类型_${cfg.skillTypes.length + 1}`,
+            icon: '🏷️',
+            color: GAUGE_PALETTE[cfg.skillTypes.length % GAUGE_PALETTE.length],
+        });
+        commitChange(true);
+    });
+
+    function renderSkillTypesList() {
+        if (!elSkillTypesEditor) return;
+        const cfg = deps.getConfig();
+        const list = cfg.skillTypes || [];
+        if (list.length === 0) {
+            elSkillTypesEditor.innerHTML = '<div class="stcf-muted">暂无自定义技能类型，点击右上角「➕ 新增技能类型」或让写卡助手 JSON 导入即可。</div>';
+            return;
+        }
+        elSkillTypesEditor.innerHTML = list.map((st, idx) => `
+            <div class="stcf-apply-row" data-stype-index="${idx}" style="margin-bottom:5px;flex-wrap:wrap;">
+                <input type="text" class="text_pole" data-stype-field="icon" value="${escapeHtml(st.icon || '🏷️')}" style="max-width:48px;text-align:center;" title="类型图标（Emoji）">
+                <input type="text" class="text_pole" data-stype-field="name" value="${escapeHtml(st.name || '')}" placeholder="类型名称（如 火焰魔法/束缚）" style="min-width:110px;flex:1;">
+                <input type="text" class="text_pole" data-stype-field="id" value="${escapeHtml(st.id || '')}" placeholder="英文/下划线 ID" style="max-width:115px;" title="类型 ID（供技能引用与 JSON 导入）">
+                <input type="color" class="stcf-color-input" data-stype-field="color" value="${escapeHtml(st.color || '#5ea3ff')}" title="标识颜色">
+                <button type="button" class="stcf-del-btn" data-stype-action="delete" title="删除此技能类型">🗑️</button>
+            </div>
+        `).join('');
+    }
+
+    elSkillTypesEditor?.addEventListener('change', (e) => {
+        const row = e.target.closest('[data-stype-index]');
+        if (!row || !e.target.dataset.stypeField) return;
+        const cfg = deps.getConfig();
+        const idx = Number(row.dataset.stypeIndex);
+        const st = cfg.skillTypes?.[idx];
+        if (!st) return;
+        const f = e.target.dataset.stypeField;
+        if (f === 'id') {
+            const oldId = st.id;
+            const nextId = String(e.target.value || '').trim().replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, '_');
+            if (!nextId || (nextId !== oldId && (cfg.skillTypes || []).some(x => x.id === nextId))) {
+                e.target.value = oldId;
+                return;
+            }
+            st.id = nextId;
+            for (const sk of cfg.skills || []) {
+                if (sk.skillType === oldId) sk.skillType = nextId;
+            }
+            commitChange(true);
+            return;
+        }
+        st[f] = String(e.target.value || '').trim();
+        commitChange(f === 'name' || f === 'icon');
+    });
+
+    elSkillTypesEditor?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-stype-action="delete"]');
+        if (!btn) return;
+        const row = btn.closest('[data-stype-index]');
+        const cfg = deps.getConfig();
+        cfg.skillTypes?.splice(Number(row.dataset.stypeIndex), 1);
+        commitChange(true);
     });
 
     function renderSkillsList(preserveOpen) {
@@ -991,7 +1066,8 @@ export async function initSettingsUI(deps) {
                 if (skillFilterWv !== 'all' && (sk.worldview || '通用') !== skillFilterWv) return false;
                 if (skillFilterPool !== 'all' && (sk.poolType || 'universal') !== skillFilterPool) return false;
                 if (skillSearchKw) {
-                    const hay = `${sk.name || ''} ${sk.id || ''} ${sk.description || ''}`.toLowerCase();
+                    const stDef = (cfg.skillTypes || []).find(t => t.id === sk.skillType || t.name === sk.skillType);
+                    const hay = `${sk.name || ''} ${sk.id || ''} ${sk.description || ''} ${sk.skillType || ''} ${stDef?.name || ''}`.toLowerCase();
                     if (!hay.includes(skillSearchKw)) return false;
                 }
                 return true;
@@ -1141,7 +1217,17 @@ export async function initSettingsUI(deps) {
                 </div>
             `).join('');
 
+            const stDef = sk.skillType ? (cfg.skillTypes || []).find(t => t.id === sk.skillType || t.name === sk.skillType) : null;
+            const stBadge = sk.skillType ? ` · ${stDef ? `${stDef.icon || ''}${stDef.name}` : `🏷️${sk.skillType}`}` : '';
+            const skillTypeOptions = [
+                `<option value="" ${!sk.skillType ? 'selected' : ''}>自动推断（按效果类型）</option>`,
+                ...(cfg.skillTypes || []).map(t => `<option value="${escapeHtml(t.id)}" ${sk.skillType === t.id ? 'selected' : ''}>${escapeHtml(t.icon || '🏷️')} ${escapeHtml(t.name)}</option>`),
+                ...(sk.skillType && !(cfg.skillTypes || []).some(t => t.id === sk.skillType)
+                    ? [`<option value="${escapeHtml(sk.skillType)}" selected>🏷️ ${escapeHtml(sk.skillType)}（自定义）</option>`]
+                    : []),
+            ].join('');
             const intBadges = [
+                stBadge,
                 sk.interruptible === 'by_any_hit' ? ' · 💥受击即断' : (sk.interruptible === 'by_interrupt' ? ' · ⚡可打断' : ''),
                 sk.canInterrupt ? ` · 🔨打断${(sk.interruptChance ?? 100) < 100 ? `${sk.interruptChance}%` : ''}` : '',
             ].join('');
@@ -1163,7 +1249,7 @@ export async function initSettingsUI(deps) {
                         <div class="stcf-field-row">
                             <input type="text" class="text_pole" data-field="name" value="${escapeHtml(sk.name)}" placeholder="技能名称">
                         </div>
-                        <div class="stcf-grid-2">
+                        <div class="stcf-grid-3">
                             <label class="stcf-mini-field"><span>世界观大组</span><input type="text" class="text_pole" data-field="worldview" value="${escapeHtml(sk.worldview || '通用')}"></label>
                             <label class="stcf-mini-field"><span>所属技能池</span>
                                 <select class="text_pole" data-field="poolType">
@@ -1171,6 +1257,9 @@ export async function initSettingsUI(deps) {
                                     <option value="universal" ${sk.poolType === 'universal' ? 'selected' : ''}>🌐 通用技能池 (universal)</option>
                                     <option value="monster" ${sk.poolType === 'monster' ? 'selected' : ''}>👹 怪物技能池 (monster)</option>
                                 </select>
+                            </label>
+                            <label class="stcf-mini-field"><span>🏷️ 技能类型（意图预告显示）</span>
+                                <select class="text_pole" data-field="skillType">${skillTypeOptions}</select>
                             </label>
                         </div>
                         <div class="stcf-field-row">
@@ -1426,7 +1515,7 @@ export async function initSettingsUI(deps) {
         skill[field] = e.target.type === 'checkbox'
             ? e.target.checked
             : (e.target.type === 'number' ? (Number(e.target.value) || 0) : e.target.value);
-        commitChange(['name', 'worldview', 'poolType', 'interruptible', 'canInterrupt'].includes(field));
+        commitChange(['name', 'worldview', 'poolType', 'skillType', 'interruptible', 'canInterrupt'].includes(field));
     });
     elSkillsEditor.addEventListener('click', (e) => {
         const card = e.target.closest('.stcf-item-card');
@@ -2254,6 +2343,7 @@ export async function initSettingsUI(deps) {
         renderClassesList(preserveOpen);
         renderUnitsList('ally', elAlliesEditor, preserveOpen);
         renderUnitsList('enemy', elEnemiesEditor, preserveOpen);
+        renderSkillTypesList();
         renderSkillsList(preserveOpen);
         renderEquipmentsList(preserveOpen);
         renderItemsList(preserveOpen);

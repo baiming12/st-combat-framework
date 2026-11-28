@@ -285,6 +285,7 @@ export function buildAuthoringConfigSnapshot(config) {
             mpCost: s.mpCost, cooldown: s.cooldown || 0, targetType: s.targetType, effectType: s.effectType,
             formula: s.formula,
         };
+        if (s.skillType) out.skillType = s.skillType;
         if (s.hitRate !== 100) out.hitRate = s.hitRate;
         if (s.critRate) { out.critRate = s.critRate; out.critMultiplier = s.critMultiplier; }
         if (s.interruptible && s.interruptible !== 'none') out.interruptible = s.interruptible;
@@ -360,6 +361,7 @@ export function buildAuthoringConfigSnapshot(config) {
         progression: config.progression,
         gauges: config.gauges,
         classTrees: config.classTrees || [],
+        skillTypes: config.skillTypes || [],
         statuses: (config.statuses || []).map(cleanStatus),
         skills: (config.skills || []).map(cleanSkill),
         equipments: config.equipments || [],
@@ -475,6 +477,10 @@ export function buildAiContextSnapshot(battleState, config) {
         if ((config.enemies || []).length > 0) {
             const txt = config.enemies.map(e => `${e.id}:${e.name}${e.description ? `(${e.description})` : ''}`).join('；');
             catLines.push(`- 敌人图鉴：${txt}`);
+        }
+        if ((config.skillTypes || []).length > 0) {
+            const txt = config.skillTypes.map(t => `${t.id}:${t.icon || ''}${t.name}`).join('；');
+            catLines.push(`- 技能类型库：${txt}`);
         }
         if ((config.skills || []).length > 0) {
             const txt = config.skills.map(s => `${s.id}:${s.name}${s.description ? `(${s.description})` : ''}`).join('；');

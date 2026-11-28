@@ -315,7 +315,21 @@ function normalizePrereqGroups(rawGroups) {
 }
 
 /**
- * 规范化单个技能（v2.2：多组与/或前置条件、多附加状态、复合效果、命中暴击、状态槽门槛）
+ * 规范化单个自定义技能类型（v2.3.1：支持用户与写卡助手自由新增任意技能类型）
+ */
+export function normalizeSkillType(raw, idx = 0) {
+    const defaultId = `stype_${String(idx + 1).padStart(2, '0')}`;
+    const id = String(raw?.id || defaultId).trim().replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, '_') || defaultId;
+    return {
+        id,
+        name: String(raw?.name ?? id).trim() || id,
+        icon: String(raw?.icon ?? '🏷️').trim() || '🏷️',
+        color: String(raw?.color || '#5ea3ff').trim() || '#5ea3ff',
+    };
+}
+
+/**
+ * 规范化单个技能（v2.2/v2.3：多组与/或/非前置条件、自定义技能类型、可打断/打断效果、复合效果）
  */
 export function normalizeSkill(sk, idx = 0) {
     const defaultId = `skill_${String(idx + 1).padStart(2, '0')}`;
@@ -330,6 +344,7 @@ export function normalizeSkill(sk, idx = 0) {
         id: String(sk?.id || defaultId).trim() || defaultId,
         worldview: String(sk?.worldview || '通用').trim() || '通用',
         poolType: validPools.includes(sk?.poolType) ? sk.poolType : 'universal',
+        skillType: String(sk?.skillType || '').trim(),
         name: String(sk?.name ?? defaultId).trim() || defaultId,
         description: String(sk?.description || ''),
         mpCost: Math.max(0, Math.round(Number(sk?.mpCost ?? 0) || 0)),
@@ -604,7 +619,10 @@ export function normalizeConfig(rawConfig, defaults) {
         };
     });
 
-    // 4. 技能库
+    // 4. 自定义技能类型库 & 技能库
+    const rawSkillTypes = Array.isArray(src.skillTypes) ? src.skillTypes : (base.skillTypes || []);
+    const skillTypes = rawSkillTypes.map((st, idx) => normalizeSkillType(st, idx));
+
     const rawSkills = Array.isArray(src.skills) ? src.skills : base.skills;
     const skills = rawSkills.map((sk, idx) => normalizeSkill(sk, idx));
 
@@ -657,6 +675,7 @@ export function normalizeConfig(rawConfig, defaults) {
         progression,
         gauges,
         classTrees,
+        skillTypes,
         statuses,
         skills,
         equipments,
@@ -1098,6 +1117,7 @@ export function applyConfigPatch(currentConfig, parsed, mode = 'patch', defaults
 
     const sections = [
         ['classTrees', '职业树', Infinity],
+        ['skillTypes', '技能类型', Infinity],
         ['statuses', '状态', Infinity],
         ['skills', '技能', Infinity],
         ['equipments', '装备', Infinity],

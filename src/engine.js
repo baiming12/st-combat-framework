@@ -1759,11 +1759,22 @@ export function syncDefaultSelections(state) {
     }
 }
 
+export function findSkillTypeById(config, typeId) {
+    if (!typeId) return null;
+    return (config?.skillTypes || []).find(t => t.id === typeId || t.name === typeId) || null;
+}
+
 /**
- * 获取技能的通用行动类型文案（用于敌人意图「仅显示类型」模式）
+ * 获取技能的行动类型文案（优先使用自定义技能类型 skillType，未配置时按效果类型与目标范围自动推断）
  */
-export function getSkillIntentTypeLabel(skill) {
+export function getSkillIntentTypeLabel(skill, config = null) {
     if (!skill) return '行动';
+    const rawType = String(skill.skillType || '').trim();
+    if (rawType) {
+        const def = findSkillTypeById(config, rawType);
+        if (def) return `${def.icon ? `${def.icon} ` : ''}${def.name}`;
+        return `🏷️ ${rawType}`;
+    }
     if (skill.effectType === 'damage') {
         return skill.targetType === 'all_enemies' ? '⚔️ 群体攻击' : '⚔️ 单体攻击';
     }
@@ -1850,9 +1861,11 @@ export function formatEnemyIntentSummary(unit, state, config, modeOverride = nul
     else if (sk.targetType === 'self') targetLabel = '自身';
     else if (intent.targetId) targetLabel = findUnitById(state, intent.targetId)?.name || '目标';
 
+    const typeLabel = getSkillIntentTypeLabel(sk, config);
+    const customTypeDef = sk.skillType ? findSkillTypeById(config, sk.skillType) : null;
     const actionLabel = mode === 'type_only'
-        ? getSkillIntentTypeLabel(sk)
-        : `🎯 ${sk.name}`;
+        ? typeLabel
+        : `🎯 ${sk.name}${sk.skillType ? ` [${customTypeDef ? customTypeDef.name : sk.skillType}]` : ''}`;
     const text = targetLabel ? `${actionLabel} → ${targetLabel}` : actionLabel;
 
     let badge = '';
@@ -1875,7 +1888,8 @@ export function formatEnemyIntentSummary(unit, state, config, modeOverride = nul
         text,
         badge,
         badgeKind,
-        tooltip: `${mode === 'type_only' ? getSkillIntentTypeLabel(sk) : `${sk.name}：${sk.description || ''}`}${targetLabel ? `｜目标：${targetLabel}` : ''}｜${intTip}`,
+        typeColor: customTypeDef?.color || '',
+        tooltip: `${mode === 'type_only' ? typeLabel : `${sk.name}（${typeLabel}）：${sk.description || ''}`}${targetLabel ? `｜目标：${targetLabel}` : ''}｜${intTip}`,
     };
 }
 
