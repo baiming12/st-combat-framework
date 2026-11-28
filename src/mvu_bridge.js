@@ -94,10 +94,10 @@ function findLatestVariableFloor(ctx) {
 }
 
 /**
- * 读取当前聊天的 MVU stat_data 对象（三层兼容，支持 Swipe 滑卡回滚）
- * @returns {{ statData: object, combat: object, source: string, messageIndex: number, swipeId: number, rawMvuData?: object } | null}
+ * 读取当前聊天的 MVU stat_data 对象（三层兼容，支持区分「无 stat_data」与「有 stat_data 但缺 combat」）
+ * @returns {{ statData: object, hasCombat: boolean, combat: object|null, source: string, messageIndex: number, swipeId: number, rawMvuData?: object } | null}
  */
-export function readMvuCombatBlock() {
+export function readMvuStatDataRecord() {
     const ctx = getSTContext();
     const floor = findLatestVariableFloor(ctx);
     const msgId = floor ? floor.messageIndex : -1;
@@ -107,10 +107,12 @@ export function readMvuCombatBlock() {
         const Mvu = typeof window !== 'undefined' ? window.Mvu : null;
         if (Mvu && typeof Mvu.getMvuData === 'function' && msgId >= 0) {
             const mvuData = Mvu.getMvuData({ type: 'message', message_id: msgId });
-            if (mvuData?.stat_data?.combat && typeof mvuData.stat_data.combat === 'object') {
+            if (mvuData?.stat_data && typeof mvuData.stat_data === 'object') {
+                const hasCombat = Boolean(mvuData.stat_data.combat && typeof mvuData.stat_data.combat === 'object');
                 return {
                     statData: mvuData.stat_data,
-                    combat: deepClone(mvuData.stat_data.combat),
+                    hasCombat,
+                    combat: hasCombat ? deepClone(mvuData.stat_data.combat) : null,
                     source: 'Mvu',
                     messageIndex: msgId,
                     swipeId: floor.swipeId,
@@ -127,20 +129,24 @@ export function readMvuCombatBlock() {
         const TH = typeof window !== 'undefined' ? window.TavernHelper : null;
         if (TH && typeof TH.getVariables === 'function') {
             const msgVars = msgId >= 0 ? TH.getVariables({ type: 'message', message_id: msgId }) : null;
-            if (msgVars?.stat_data?.combat && typeof msgVars.stat_data.combat === 'object') {
+            if (msgVars?.stat_data && typeof msgVars.stat_data === 'object') {
+                const hasCombat = Boolean(msgVars.stat_data.combat && typeof msgVars.stat_data.combat === 'object');
                 return {
                     statData: msgVars.stat_data,
-                    combat: deepClone(msgVars.stat_data.combat),
+                    hasCombat,
+                    combat: hasCombat ? deepClone(msgVars.stat_data.combat) : null,
                     source: 'TavernHelper_message',
                     messageIndex: msgId,
                     swipeId: floor?.swipeId ?? 0,
                 };
             }
             const chatVars = TH.getVariables({ type: 'chat' });
-            if (chatVars?.stat_data?.combat && typeof chatVars.stat_data.combat === 'object') {
+            if (chatVars?.stat_data && typeof chatVars.stat_data === 'object') {
+                const hasCombat = Boolean(chatVars.stat_data.combat && typeof chatVars.stat_data.combat === 'object');
                 return {
                     statData: chatVars.stat_data,
-                    combat: deepClone(chatVars.stat_data.combat),
+                    hasCombat,
+                    combat: hasCombat ? deepClone(chatVars.stat_data.combat) : null,
                     source: 'TavernHelper_chat',
                     messageIndex: msgId,
                     swipeId: floor?.swipeId ?? 0,
@@ -156,20 +162,24 @@ export function readMvuCombatBlock() {
         if (floor && Array.isArray(ctx.chat)) {
             const msg = ctx.chat[floor.messageIndex];
             const slot = msg?.variables?.[floor.swipeId];
-            if (slot?.stat_data?.combat && typeof slot.stat_data.combat === 'object') {
+            if (slot?.stat_data && typeof slot.stat_data === 'object') {
+                const hasCombat = Boolean(slot.stat_data.combat && typeof slot.stat_data.combat === 'object');
                 return {
                     statData: slot.stat_data,
-                    combat: deepClone(slot.stat_data.combat),
+                    hasCombat,
+                    combat: hasCombat ? deepClone(slot.stat_data.combat) : null,
                     source: 'chat_variables',
                     messageIndex: floor.messageIndex,
                     swipeId: floor.swipeId,
                 };
             }
         }
-        if (ctx.chatMetadata?.variables?.stat_data?.combat && typeof ctx.chatMetadata.variables.stat_data.combat === 'object') {
+        if (ctx.chatMetadata?.variables?.stat_data && typeof ctx.chatMetadata.variables.stat_data === 'object') {
+            const hasCombat = Boolean(ctx.chatMetadata.variables.stat_data.combat && typeof ctx.chatMetadata.variables.stat_data.combat === 'object');
             return {
                 statData: ctx.chatMetadata.variables.stat_data,
-                combat: deepClone(ctx.chatMetadata.variables.stat_data.combat),
+                hasCombat,
+                combat: hasCombat ? deepClone(ctx.chatMetadata.variables.stat_data.combat) : null,
                 source: 'chatMetadata',
                 messageIndex: msgId,
                 swipeId: floor?.swipeId ?? 0,
@@ -183,17 +193,52 @@ export function readMvuCombatBlock() {
 }
 
 /**
+ * 读取当前聊天的 MVU stat_data.combat 区块（仅在 combat 存在时返回）
+ * @returns {{ statData: object, combat: object, source: string, messageIndex: number, swipeId: number, rawMvuData?: object } | null}
+ */
+export function readMvuCombatBlock() {
+    const rec = readMvuStatDataRecord();
+    if (!rec || !rec.hasCombat) return null;
+    return rec;
+}
+
+/**
+ * 诊断当前聊天的 MVU 变量状态：区分「正常」「已有 stat_data 但缺少 combat」「完全未检测到 stat_data」
+ */
+export function diagnoseMvuCombatState() {
+    const rec = readMvuStatDataRecord();
+    if (!rec) {
+        return { status: 'no_stat_data', existingKeys: [], source: '', messageIndex: -1 };
+    }
+    if (!rec.hasCombat) {
+        return {
+            status: 'missing_combat',
+            existingKeys: Object.keys(rec.statData || {}).filter(k => !k.startsWith('$')),
+            source: rec.source,
+            messageIndex: rec.messageIndex,
+        };
+    }
+    return {
+        status: 'ok',
+        existingKeys: Object.keys(rec.statData || {}).filter(k => !k.startsWith('$')),
+        source: rec.source,
+        messageIndex: rec.messageIndex,
+    };
+}
+
+/**
  * 将最新的 combat 区块安全写回 MVU Zod（绝不破坏 stat_data 里的其他变量）
  * @param {object} nextCombatBlock
+ * @param {{ allowCreateCombat?: boolean }} [options]
  * @returns {Promise<boolean>}
  */
-async function writeMvuCombatBlock(nextCombatBlock) {
-    const existing = readMvuCombatBlock();
-    if (!existing) return false; // 当前角色卡未定义 stat_data.combat，静默跳过
+async function writeMvuCombatBlock(nextCombatBlock, options = {}) {
+    const existing = options.allowCreateCombat ? readMvuStatDataRecord() : readMvuCombatBlock();
+    if (!existing) return false; // 当前角色卡未定义 stat_data（或未开启自动补建时缺少 combat），静默跳过
 
     const ctx = getSTContext();
     const mergedCombat = {
-        ...existing.combat,
+        ...(existing.combat || {}),
         ...nextCombatBlock,
     };
 
@@ -586,4 +631,73 @@ export async function pushToMvuZod(config, battleState, options = {}) {
     }
 
     return writeMvuCombatBlock(patch);
+}
+
+/**
+ * 当角色卡已启用 MVU（存在 stat_data）但写卡助手漏写了 combat 区块时，
+ * 按当前战斗插件配置一键向 stat_data.combat 补建标准初始结构（绝不触碰其他变量）
+ * @param {object} config
+ * @param {object|null} battleState
+ * @returns {Promise<{ ok: boolean, message: string }>}
+ */
+export async function initMvuCombatBlock(config, battleState) {
+    const rec = readMvuStatDataRecord();
+    if (!rec) {
+        return { ok: false, message: '未检测到 MVU stat_data，请先确认该角色卡已启用 MVU 且开场白已初始化变量。' };
+    }
+
+    const gaugeEntries = getGaugeEntries(config);
+    const hasExtraGauges = gaugeEntries.some(g => g.id !== 'gauge_a' && g.id !== 'gauge_b');
+    const isFighting = Boolean(
+        battleState?.active && battleState.phase !== 'victory' && battleState.phase !== 'defeat'
+    );
+
+    const allies = {};
+    const activeAllies = (config.allies || []).filter(a => a.enabled);
+    const sourceAllies = activeAllies.length > 0 ? activeAllies : (config.allies || []).slice(0, 1);
+    for (const tpl of sourceAllies) {
+        const live = battleState?.active ? (battleState.allies || []).find(a => a.id === tpl.id) : null;
+        const nextGauges = {};
+        for (const gDef of gaugeEntries) {
+            const initVal = tpl.initialGauges?.[gDef.id]
+                ?? (gDef.id === 'gauge_a' ? tpl.initialGaugeA : (gDef.id === 'gauge_b' ? tpl.initialGaugeB : gDef.min));
+            nextGauges[gDef.id] = live ? (live.gauges?.[gDef.id] ?? gDef.min) : (initVal ?? gDef.min);
+        }
+        const entry = {
+            level: live ? (live.level || 1) : (tpl.level || 1),
+            classId: live ? (live.classId || '') : (tpl.classId || ''),
+            freePoints: live ? (live.freePoints || 0) : (tpl.freePoints || 0),
+            allocated: deepClone(live ? (live.allocated || tpl.allocated) : (tpl.allocated || { vit: 0, str: 0, spi: 0, def: 0, mdef: 0 })),
+            hp: live ? live.hp : tpl.maxHp,
+            mp: live ? live.mp : tpl.maxMp,
+            gauge_a: nextGauges.gauge_a ?? 0,
+            gauge_b: nextGauges.gauge_b ?? 0,
+            equipmentIds: [...(live ? (live.equipmentIds || []) : (tpl.equipmentIds || []))],
+            skillIds: [...(live ? (live.skillIds || []) : (tpl.skillIds || []))],
+            statuses: live ? serializeStatusesForMvu(live.statuses, config) : [],
+        };
+        if (hasExtraGauges) entry.gauges = nextGauges;
+        allies[tpl.id] = entry;
+    }
+
+    const items = {};
+    for (const it of config.items || []) {
+        items[it.id] = Math.max(0, Math.round(Number(it.quantity) || 0));
+    }
+
+    const ok = await writeMvuCombatBlock({
+        in_combat: isFighting,
+        allies,
+        items,
+        encounter_enemy_ids: [],
+        reinforce_enemy_ids: [],
+    }, { allowCreateCombat: true });
+
+    if (!ok) {
+        return { ok: false, message: '补建 stat_data.combat 失败（请检查酒馆助手/MVU 写入权限或 Zod 是否拦截了未知字段）。' };
+    }
+    return {
+        ok: true,
+        message: `已自动在 MVU stat_data 中补建 combat 区块（含 ${Object.keys(allies).length} 名我方角色与 ${Object.keys(items).length} 种道具）！`,
+    };
 }

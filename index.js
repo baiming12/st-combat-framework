@@ -19,7 +19,7 @@ import {
 } from './src/config.js';
 import { syncAllUnitsEquipment } from './src/engine.js';
 import { initHudUI } from './src/hud_ui.js';
-import { pullFromMvuZod, pushToMvuZod } from './src/mvu_bridge.js';
+import { diagnoseMvuCombatState, initMvuCombatBlock, pullFromMvuZod, pushToMvuZod } from './src/mvu_bridge.js';
 import { clearAllInjectedPrompts, syncThresholdPrompts } from './src/prompt_injector.js';
 import { initSettingsUI } from './src/settings_ui.js';
 
@@ -63,7 +63,29 @@ function syncPullFromMvu(showNotice = false) {
         hudController?.pushPendingEvents(res.events);
     }
     if (showNotice) {
-        hudController?.showToast(res.found ? `🔄 ${res.summary}` : 'ℹ️ 当前角色卡未检测到 MVU stat_data.combat');
+        if (res.found) {
+            hudController?.showToast(`🔄 ${res.summary}`);
+        } else {
+            const diag = diagnoseMvuCombatState();
+            if (diag.status === 'missing_combat') {
+                const keysStr = diag.existingKeys.slice(0, 6).join('、') || '空';
+                const shouldInit = typeof window !== 'undefined' && typeof window.confirm === 'function'
+                    ? window.confirm(
+                        `检测到当前角色卡已启用 MVU（stat_data 已有键：${keysStr}），但缺少战斗插件所需的英文键 stat_data.combat（常见于写卡助手漏写或写成了中文键名）。\n\n是否立即按当前战斗插件的队伍与道具配置，自动往 stat_data.combat 补建初始结构？（绝不会修改其他变量）`
+                    )
+                    : false;
+                if (shouldInit) {
+                    initMvuCombatBlock(currentConfig, currentBattleState).then(initRes => {
+                        hudController?.showToast(initRes.ok ? `✅ ${initRes.message}` : `⚠️ ${initRes.message}`);
+                        if (initRes.ok) refreshRuntimeWithoutPush();
+                    });
+                } else {
+                    hudController?.showToast(`⚠️ 检测到 MVU stat_data，但缺少英文键 combat（当前已有：${keysStr}）`);
+                }
+            } else {
+                hudController?.showToast('ℹ️ 未检测到 MVU stat_data（请确认该卡已开启 MVU 脚本且开场白已初始化变量）');
+            }
+        }
     }
     return res;
 }
