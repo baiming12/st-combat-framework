@@ -889,7 +889,9 @@ export async function initHudUI(deps) {
 
         const equipCount = (unit.equipmentIds || []).length;
         const equipBadge = equipCount > 0 ? `<span class="stcf-equip-count" title="已穿戴 ${equipCount} 件装备">🛡️${equipCount}</span>` : '';
-        const autoBadge = (unit.side === 'ally' && unit.autoControl) ? '<span class="stcf-unit-tag stcf-tag-stun" title="已开启自动托管 AI">🤖托管</span>' : '';
+        const autoToggleBtn = unit.side === 'ally'
+            ? `<button type="button" class="stcf-target-pin ${unit.autoControl ? 'active' : ''}" data-toggle-auto="${escapeHtml(unit.id)}" title="${unit.autoControl ? '当前由 AI 自动托管出招（点击切回手动控制）' : '当前手动控制（点击开启 AI 自动托管）'}" style="${unit.autoControl ? 'border-color:#f1c40f;background:rgba(241,196,15,0.28);color:#ffe17a;' : 'opacity:0.55;'}">${unit.autoControl ? '🤖托管' : '🤖'}</button>`
+            : '';
         const clsObj = config.progression?.enabled ? findClassById(config, unit.classId) : null;
         const lvClassTag = config.progression?.enabled && unit.side === 'ally'
             ? `<span class="stcf-unit-tag stcf-tag-lv">Lv.${unit.level || 1}${clsObj ? ` ${escapeHtml(clsObj.name)}` : ''}</span>`
@@ -928,7 +930,7 @@ export async function initHudUI(deps) {
                         <span class="stcf-unit-name">${escapeHtml(unit.name)}</span>
                         ${lvClassTag}
                         ${stateTag}
-                        ${autoBadge}
+                        ${autoToggleBtn}
                         ${equipBadge}
                     </div>
                     <div class="stcf-unit-top-right">
@@ -1218,6 +1220,24 @@ export async function initHudUI(deps) {
             e.stopPropagation();
             if (adjustUnitStatManual(state, config, gmBtn.dataset.gmUnit, gmBtn.dataset.gmStat, Number(gmBtn.dataset.gmDelta))) {
                 deps.onStateMutated();
+            }
+            return;
+        }
+
+        const autoBtn = e.target.closest('[data-toggle-auto]');
+        if (autoBtn) {
+            e.stopPropagation();
+            const uid = autoBtn.dataset.toggleAuto;
+            const liveAlly = (state.allies || []).find(a => a.id === uid);
+            const tplAlly = (config.allies || []).find(a => a.id === uid);
+            if (liveAlly) {
+                const nextVal = !liveAlly.autoControl;
+                liveAlly.autoControl = nextVal;
+                if (tplAlly) tplAlly.autoControl = nextVal;
+                saveConfig(config);
+                deps.onConfigMutated?.();
+                deps.onStateMutated();
+                showToast(nextVal ? `🤖 ${liveAlly.name} 已切为 AI 自动托管` : `🎮 ${liveAlly.name} 已切回手动控制`);
             }
             return;
         }

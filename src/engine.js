@@ -400,6 +400,20 @@ export function syncUnitEquipmentEffects(unit, config, fillNewMax = false) {
 export function syncAllUnitsEquipment(state, config) {
     if (!state || !state.active) return;
     for (const unit of getAllUnits(state)) {
+        if (unit.side === 'ally') {
+            const tpl = (config?.allies || []).find(a => a.id === unit.id);
+            if (tpl) {
+                unit.autoControl = Boolean(tpl.autoControl);
+                unit.aiStrategy = tpl.aiStrategy || unit.aiStrategy;
+                unit.aiTargetMode = tpl.aiTargetMode || unit.aiTargetMode;
+            }
+        } else {
+            const tpl = (config?.enemies || []).find(e => e.id === unit.id);
+            if (tpl) {
+                unit.aiStrategy = tpl.aiStrategy || unit.aiStrategy;
+                unit.aiTargetMode = tpl.aiTargetMode || unit.aiTargetMode;
+            }
+        }
         syncUnitEquipmentEffects(unit, config, false);
     }
 }
